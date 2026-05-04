@@ -8,7 +8,9 @@
 
 ## Demo Video
 
-<video src="docs/assets/afu-demo.mp4" controls muted loop playsinline></video>
+<video src="https://github.com/LearnPrompt/afu-llm-todo/releases/download/demo-video-v1/afu-demo.mp4" poster="docs/assets/afu-demo-poster.png" controls muted loop playsinline></video>
+
+[Open the demo video](https://github.com/LearnPrompt/afu-llm-todo/releases/download/demo-video-v1/afu-demo.mp4)
 
 ## What Is Afu
 
@@ -100,9 +102,3 @@ Notes should not stay trapped in an inbox forever. And a wiki should not only be
 It should produce action.
 
 That is Afu.
-
-## More
-
-- Config and vault paths: [docs/config.md](docs/config.md)
-- Local API: [docs/api.md](docs/api.md)
-- Credits and boundaries: [docs/credits.md](docs/credits.md)

@@ -4,6 +4,12 @@
 
 文件：`docs/assets/afu-demo.mp4`
 
+GitHub README 使用 Release 视频地址：
+
+```text
+https://github.com/LearnPrompt/afu-llm-todo/releases/download/demo-video-v1/afu-demo.mp4
+```
+
 画面节奏：
 
 1. 收件箱里勾选 3 条 sample 素材。

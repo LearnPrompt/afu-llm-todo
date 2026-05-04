@@ -10,7 +10,9 @@
 
 ## 演示视频
 
-<video src="docs/assets/afu-demo.mp4" controls muted loop playsinline></video>
+<video src="https://github.com/LearnPrompt/afu-llm-todo/releases/download/demo-video-v1/afu-demo.mp4" poster="docs/assets/afu-demo-poster.png" controls muted loop playsinline></video>
+
+[如果播放器没有显示，点这里看演示视频](https://github.com/LearnPrompt/afu-llm-todo/releases/download/demo-video-v1/afu-demo.mp4)
 
 事情是这样的。
 
@@ -123,11 +125,3 @@ Inbox
 它应该长出行动。
 
 这就是 Afu。
-
-## 更多
-
-- 配置和目录适配：[docs/config.md](docs/config.md)
-- 本地 API：[docs/api.md](docs/api.md)
-- 引用和品牌边界：[docs/credits.md](docs/credits.md)
-- ClawHub 文案：[docs/launch/clawhub.md](docs/launch/clawhub.md)
-- 录屏脚本：[docs/launch/demo-script.md](docs/launch/demo-script.md)

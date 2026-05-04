@@ -38,7 +38,7 @@ npx skills add LearnPrompt/afu-llm-todo
 
 ## Demo
 
-Demo video: `docs/assets/afu-demo.mp4`
+Demo video: `https://github.com/LearnPrompt/afu-llm-todo/releases/download/demo-video-v1/afu-demo.mp4`
 
 本地 UI：
 

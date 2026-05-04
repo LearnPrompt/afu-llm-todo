@@ -1,4 +1,34 @@
-# 60 秒 Demo 脚本
+# Demo 录屏脚本
+
+## 10 秒短视频版
+
+目标不是讲完所有功能，而是让人一眼看懂：
+
+```text
+Inbox -> Wiki -> Todo -> Calendar
+```
+
+建议录制路径：
+
+1. 停在 `收件箱`，勾选 3 条 sample 素材。
+2. 点击 `加入 Wiki 批次`。
+3. 切到 `Wiki`，点击 `生成行动卡`。
+4. 接受 1 张行动卡。
+5. 切到 `题库` 或点击 `查看题库`，把卡片拖进周历。
+
+成片文件预留为：
+
+```text
+docs/assets/afu-demo-10s.mp4
+```
+
+上传后，README 的 Demo Video 占位区可以替换为：
+
+```html
+<video src="docs/assets/afu-demo-10s.mp4" controls muted loop playsinline></video>
+```
+
+## 60 秒完整版
 
 ## 目标
 

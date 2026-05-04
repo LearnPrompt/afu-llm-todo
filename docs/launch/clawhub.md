@@ -50,6 +50,8 @@ Turn your Obsidian inbox into a living wiki, then into this week's todo list.
 
 ## Demo
 
+Demo video: `docs/assets/afu-demo-10s.mp4`
+
 ```bash
 npm run demo:reset
 npm run demo

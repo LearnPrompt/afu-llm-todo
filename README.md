@@ -17,6 +17,12 @@ tags:
 
 ![Afu logo concept](docs/assets/afu-logo-butler-crystal.svg)
 
+## Demo Video
+
+10 秒演示视频会放在这里。现在先用当前 demo 截图占位，等视频上传后替换为 `docs/assets/afu-demo-10s.mp4`。
+
+![Afu demo workspace](docs/assets/afu-demo-workspace.png)
+
 你不需要又一个 Todo App。你需要一个管家阿福。
 
 他不抢主角戏，不替你写人生规划，也不把你的 Obsidian 搬去另一个数据库。阿福站在 Vault 前面，把收件箱里的网页、帖子、论文、灵感和碎片先整理成 LLM Wiki，再安排成本周能执行的行动卡和日历。
@@ -59,8 +65,6 @@ open http://localhost:4317
 ```
 
 Demo 使用 `examples/sample-vault/`，不会碰你的真实 Vault。
-
-![Afu demo workspace](docs/assets/afu-demo-workspace.png)
 
 演示流程：
 

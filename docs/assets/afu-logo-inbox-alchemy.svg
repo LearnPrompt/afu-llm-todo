@@ -1,0 +1,23 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Afu Inbox Alchemy Logo Concept</title>
+  <desc id="desc">Abstract inbox notes transforming into wiki pages and todo cards.</desc>
+  <rect width="1200" height="630" rx="40" fill="#F8F2E8"/>
+  <rect x="128" y="190" width="250" height="250" rx="32" fill="#FFFDF8" stroke="#241609" stroke-width="8"/>
+  <path d="M128 302H215L248 340H378" stroke="#241609" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="176" y="230" width="150" height="18" rx="9" fill="#8A7B6B"/>
+  <rect x="176" y="266" width="112" height="18" rx="9" fill="#E7DED2"/>
+  <path d="M430 315C493 270 538 270 600 315C662 360 707 360 770 315" stroke="#C76542" stroke-width="12" stroke-linecap="round"/>
+  <path d="M590 198L607 250L662 250L617 282L635 335L590 302L545 335L563 282L518 250L573 250L590 198Z" fill="#2F6F4E"/>
+  <circle cx="514" cy="376" r="12" fill="#C76542"/>
+  <circle cx="668" cy="226" r="12" fill="#C76542"/>
+  <circle cx="714" cy="392" r="12" fill="#2F6F4E"/>
+  <g fill="#FFFDF8" stroke="#241609" stroke-width="8">
+    <rect x="820" y="160" width="232" height="124" rx="24"/>
+    <rect x="820" y="318" width="232" height="124" rx="24"/>
+  </g>
+  <rect x="856" y="200" width="130" height="14" rx="7" fill="#2F6F4E"/>
+  <rect x="856" y="230" width="92" height="14" rx="7" fill="#8A7B6B"/>
+  <rect x="856" y="358" width="130" height="14" rx="7" fill="#C76542"/>
+  <rect x="856" y="388" width="92" height="14" rx="7" fill="#8A7B6B"/>
+  <text x="600" y="554" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="48" font-weight="800" fill="#241609">管家阿福把素材炼成行动</text>
+</svg>

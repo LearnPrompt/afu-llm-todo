@@ -1,0 +1,36 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Afu Wiki Calendar Logo Concept</title>
+  <desc id="desc">Abstract LLM Wiki graph flowing into weekly calendar cards.</desc>
+  <rect width="1200" height="630" rx="40" fill="#FAF5ED"/>
+  <path d="M240 166C344 98 486 104 586 186C690 272 833 280 958 198" stroke="#2F6F4E" stroke-width="10" stroke-linecap="round" stroke-dasharray="2 24"/>
+  <g fill="#FFFDF8" stroke="#241609" stroke-width="6">
+    <circle cx="252" cy="166" r="42"/>
+    <circle cx="424" cy="126" r="42"/>
+    <circle cx="582" cy="188" r="42"/>
+    <circle cx="758" cy="244" r="42"/>
+    <circle cx="948" cy="198" r="42"/>
+  </g>
+  <g fill="#C76542">
+    <circle cx="252" cy="166" r="10"/>
+    <circle cx="424" cy="126" r="10"/>
+    <circle cx="582" cy="188" r="10"/>
+    <circle cx="758" cy="244" r="10"/>
+    <circle cx="948" cy="198" r="10"/>
+  </g>
+  <path d="M600 280V338" stroke="#241609" stroke-width="8" stroke-linecap="round"/>
+  <path d="M565 320L600 355L635 320" stroke="#241609" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="178" y="370" width="844" height="158" rx="28" fill="#FFFDF8" stroke="#241609" stroke-width="7"/>
+  <line x1="178" y1="420" x2="1022" y2="420" stroke="#E7DED2" stroke-width="6"/>
+  <g stroke="#E7DED2" stroke-width="6">
+    <line x1="298" y1="370" x2="298" y2="528"/>
+    <line x1="418" y1="370" x2="418" y2="528"/>
+    <line x1="538" y1="370" x2="538" y2="528"/>
+    <line x1="658" y1="370" x2="658" y2="528"/>
+    <line x1="778" y1="370" x2="778" y2="528"/>
+    <line x1="898" y1="370" x2="898" y2="528"/>
+  </g>
+  <rect x="438" y="446" width="80" height="48" rx="18" fill="#E6EFE5"/>
+  <rect x="558" y="446" width="80" height="48" rx="18" fill="#F3DDD2"/>
+  <rect x="678" y="446" width="80" height="48" rx="18" fill="#EDE5D8"/>
+  <text x="600" y="588" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="42" font-weight="800" fill="#241609">Inbox -> LLM Wiki -> Todo -> Calendar</text>
+</svg>

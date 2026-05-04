@@ -1,0 +1,20 @@
+<svg width="1200" height="630" viewBox="0 0 1200 630" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Afu Butler Crystal Logo Concept</title>
+  <desc id="desc">Abstract tray, crystal, and todo cards for Afu LLM Todo for Obsidian.</desc>
+  <rect width="1200" height="630" rx="40" fill="#F8F2E8"/>
+  <circle cx="250" cy="175" r="120" fill="#EDE5D8"/>
+  <circle cx="955" cy="470" r="135" fill="#E6EFE5"/>
+  <path d="M284 392C387 340 525 320 642 340C745 358 825 397 921 372" stroke="#241609" stroke-width="18" stroke-linecap="round"/>
+  <path d="M345 392H855C878 392 895 411 889 433C876 482 814 522 600 522C386 522 324 482 311 433C305 411 322 392 345 392Z" fill="#2A1A0D"/>
+  <path d="M550 124L468 220L505 348H695L732 220L650 124H550Z" fill="#2F6F4E"/>
+  <path d="M550 124L505 348L600 252L650 124H550Z" fill="#83B98F"/>
+  <path d="M650 124L600 252L695 348L732 220L650 124Z" fill="#174F39"/>
+  <path d="M468 220L600 252L732 220" stroke="#F8F2E8" stroke-width="6" stroke-linecap="round"/>
+  <rect x="762" y="172" width="142" height="94" rx="18" fill="#FFFDF8" stroke="#2A1A0D" stroke-width="6"/>
+  <rect x="792" y="204" width="83" height="9" rx="4.5" fill="#C76542"/>
+  <rect x="792" y="226" width="60" height="9" rx="4.5" fill="#8A7B6B"/>
+  <rect x="298" y="190" width="142" height="94" rx="18" fill="#FFFDF8" stroke="#2A1A0D" stroke-width="6"/>
+  <rect x="328" y="222" width="83" height="9" rx="4.5" fill="#C76542"/>
+  <rect x="328" y="244" width="60" height="9" rx="4.5" fill="#8A7B6B"/>
+  <text x="600" y="586" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="48" font-weight="800" fill="#241609">Afu · LLM Todo for Obsidian</text>
+</svg>

@@ -1,0 +1,30 @@
+{
+  "vaultRoot": "/Users/yourname/ObsidianVault",
+  "topicDir": "15_自媒体/选题库",
+  "inboxDir": "00_收件箱",
+  "archiveDir": "99_系统/归档/选题占位",
+  "wikiMode": "off",
+  "wikiDir": "30_研究/内容Wiki",
+  "wikiIndexPath": "30_研究/内容Wiki/index.md",
+  "wikiLogPath": "30_研究/内容Wiki/log.md",
+  "dailyCapacity": 2,
+  "scheduleTimeSlots": [
+    {
+      "label": "上午深度",
+      "start": "09:30",
+      "end": "11:00"
+    },
+    {
+      "label": "下午制作",
+      "start": "14:00",
+      "end": "15:30"
+    },
+    {
+      "label": "晚上发布",
+      "start": "20:00",
+      "end": "20:30"
+    }
+  ],
+  "calendarProvider": "none",
+  "macosCalendarName": ""
+}

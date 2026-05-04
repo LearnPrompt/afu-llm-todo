@@ -1,0 +1,10 @@
+node_modules/
+.DS_Store
+
+# Local workspace config. Use topic-planner.config.json.example as the public template.
+topic-planner.config.json
+examples/sample-vault/topic-planner.config.json
+
+# Runtime artifacts.
+*.log
+*.tmp

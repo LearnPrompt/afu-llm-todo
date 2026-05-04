@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Afu · LLM Todo for Obsidian</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ctext y='48' font-size='48'%3E%F0%9F%93%85%3C/text%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="noise"></div>
+    <main class="app-shell">
+      <section class="hero">
+        <div class="hero-main">
+          <p class="eyebrow">AFU · LLM TODO FOR OBSIDIAN · 管家阿福</p>
+          <h1>谁不想拥有一个自己的管家阿福呢？</h1>
+          <p class="hero-copy">
+            先把 Obsidian 收件箱编译成 Wiki，再生成本周行动卡，最后拖进日历。
+          </p>
+          <div class="hero-flow" aria-label="管家阿福工作流">
+            <div class="flow-step">
+              <span>01</span>
+              <strong>接入工作区</strong>
+              <p>选择 Vault、选题库、收件箱和 Wiki。</p>
+            </div>
+            <div class="flow-step">
+              <span>02</span>
+              <strong>编译 Wiki</strong>
+              <p>把粗素材整理成可回链知识包。</p>
+            </div>
+            <div class="flow-step">
+              <span>03</span>
+              <strong>生成行动</strong>
+              <p>从 Wiki 长出可接受的 Todo 候选。</p>
+            </div>
+            <div class="flow-step">
+              <span>04</span>
+              <strong>排期同步</strong>
+              <p>拖进周历，回写 Markdown 或日历。</p>
+            </div>
+          </div>
+          <div class="hero-meta">
+            <div class="meta-card">
+              <span>日历状态</span>
+              <strong id="larkStatus">检测中</strong>
+              <button id="larkRepairBtn" class="meta-action" type="button" hidden>配置飞书</button>
+            </div>
+            <div class="meta-card">
+              <span>当前工作区</span>
+              <strong id="workspaceKind">检测中</strong>
+              <small id="workspaceConfigPath">配置文件检测中</small>
+            </div>
+            <div class="meta-card">
+              <span>本周排期</span>
+              <strong id="weekScheduledCount">0</strong>
+            </div>
+            <div class="meta-card">
+              <span>待排期</span>
+              <strong id="backlogCount">0</strong>
+            </div>
+            <div class="meta-card">
+              <span>收件箱候选</span>
+              <strong id="inboxCandidateCount">0</strong>
+            </div>
+          </div>
+        </div>
+        <div class="hero-side">
+          <form id="plannerSettingsForm" class="planner-settings-card">
+            <div class="panel-head panel-head-compact">
+              <div>
+                <p class="panel-tag">首次配置</p>
+                <h2>先接入你的工作区</h2>
+              </div>
+              <span id="plannerSettingsHint">确认目录和同步目标，保存后刷新数据。</span>
+            </div>
+            <label>
+              Vault 根目录
+              <input id="plannerVaultRoot" type="text" placeholder="/Users/you/ObsidianVault" required />
+            </label>
+            <div class="settings-grid">
+              <label>
+                选题目录
+                <input id="plannerTopicDir" type="text" placeholder="15_自媒体/选题库" required />
+              </label>
+              <label>
+                收件箱目录
+                <input id="plannerInboxDir" type="text" placeholder="00_收件箱" required />
+              </label>
+              <label>
+                归档目录
+                <input id="plannerArchiveDir" type="text" placeholder="99_系统/归档/选题占位" required />
+              </label>
+              <label>
+                同步目标
+                <select id="plannerCalendarProvider">
+                  <option value="none">只写 Markdown，不同步日历</option>
+                  <option value="lark">同步到飞书日历</option>
+                  <option value="macos">同步到 macOS 本地日历</option>
+                </select>
+              </label>
+              <div id="larkSetupPanel" class="lark-setup-panel lark-connector-card" hidden>
+                <div class="connector-top">
+                  <div>
+                    <p class="panel-tag">飞书连接器</p>
+                    <strong>飞书日历</strong>
+                    <span id="larkSetupStatus">正在检测 CLI、授权和主日历。</span>
+                  </div>
+                  <span id="larkSetupBadge" class="status-badge">检测中</span>
+                </div>
+                <div id="larkSetupAccount" class="connector-account">账号和主日历会在检测后显示。</div>
+                <div class="connector-actions">
+                  <button id="larkSetupAuthBtn" class="accent-btn" type="button">连接飞书</button>
+                  <details id="larkSetupDetails" class="connector-details">
+                    <summary>配置详情</summary>
+                    <p>第一次使用时先初始化 CLI，再授权用户日历权限。授权成功后排期可同步到飞书主日历。</p>
+                    <div class="setup-command">
+                      <code>lark-cli config init --new</code>
+                      <button id="copyLarkConfigBtn" class="mini-btn" type="button">复制</button>
+                    </div>
+                    <div class="setup-command">
+                      <code>lark-cli auth login --domain calendar</code>
+                      <button id="copyLarkAuthBtn" class="mini-btn" type="button">复制</button>
+                    </div>
+                  </details>
+                </div>
+              </div>
+              <label>
+                macOS 日历名
+                <input id="plannerMacosCalendarName" type="text" placeholder="留空则使用第一个本地日历" />
+              </label>
+              <label>
+                Wiki Mode
+                <select id="plannerWikiMode">
+                  <option value="off">关闭 Wiki Mode</option>
+                  <option value="agent">Agent 编译模式</option>
+                </select>
+              </label>
+              <label>
+                Wiki 目录
+                <input id="plannerWikiDir" type="text" placeholder="30_研究/内容Wiki" />
+              </label>
+              <label>
+                每日推荐容量
+                <input id="plannerDailyCapacity" type="number" min="1" max="12" step="1" placeholder="2" />
+              </label>
+            </div>
+            <div class="settings-actions">
+              <button class="accent-btn" type="submit">保存目录设置</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section class="toolbar">
+        <div class="toolbar-left">
+          <input id="searchInput" type="search" placeholder="搜选题 / 标签 / 目标形式" />
+          <select id="stageFilter">
+            <option value="">全部阶段</option>
+            <option value="待排期">待排期</option>
+            <option value="去重中">去重中</option>
+            <option value="已排期">已排期</option>
+            <option value="制作中">制作中</option>
+          </select>
+        </div>
+        <div class="toolbar-right">
+          <button id="prevWeekBtn" type="button">上一周</button>
+          <div id="weekLabel" class="week-label"></div>
+          <button id="nextWeekBtn" type="button">下一周</button>
+          <button id="refreshBtn" class="accent-btn" type="button">刷新</button>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <aside class="backlog-panel">
+          <div class="workspace-tabs" role="tablist" aria-label="阿福素材面板">
+            <button class="workspace-tab is-active" type="button" data-workspace-view="inbox">收件箱</button>
+            <button class="workspace-tab" type="button" data-workspace-view="wiki">Wiki</button>
+            <button class="workspace-tab" type="button" data-workspace-view="backlog">题库</button>
+          </div>
+
+          <section class="sidebar-view inbox-panel is-active" data-view-panel="inbox">
+            <div class="panel-head panel-head-compact">
+              <div>
+                <p class="panel-tag">阿福收件箱</p>
+                <h2>待转选题候选</h2>
+              </div>
+              <span id="inboxHint">直接转卡适合单条素材快速排期；Wiki 适合多条素材先合并判断再转卡。</span>
+            </div>
+            <div class="inbox-batch-toolbar">
+              <div class="pager-group inbox-pager">
+                <button id="inboxPrevBtn" class="ghost-btn" type="button">上一页</button>
+                <div class="page-copy">
+                  <strong id="inboxPageInfo">第 1 / 1 页</strong>
+                  <span id="inboxWindowInfo">当前显示 0 / 0</span>
+                </div>
+                <button id="inboxNextBtn" class="ghost-btn" type="button">下一页</button>
+              </div>
+              <label class="page-size-control">
+                每页
+                <select id="inboxPageSize">
+                  <option value="20" selected>20 条</option>
+                  <option value="3">3 条</option>
+                  <option value="50">50 条</option>
+                  <option value="100">100 条</option>
+                </select>
+              </label>
+              <div class="inbox-batch-actions">
+                <button id="inboxSelectPageBtn" class="ghost-btn" type="button">本页全选</button>
+                <button id="inboxImportBatchBtn" class="accent-btn" type="button">批量转卡</button>
+                <button id="inboxWikiBatchBtn" class="ghost-btn" type="button">加入 Wiki 批次</button>
+              </div>
+              <div id="inboxBatchInfo" class="batch-info">未选择素材</div>
+            </div>
+            <div id="inboxCandidateList" class="inbox-candidate-list"></div>
+          </section>
+
+          <section class="sidebar-view wiki-panel" data-view-panel="wiki">
+            <div class="panel-head panel-head-compact">
+              <div>
+                <p class="panel-tag">LLM Todo</p>
+                <h2>Wiki Mode</h2>
+              </div>
+              <span id="wikiHint">Wiki 会先批量编译素材、合并重复信息，再生成更有理由的行动卡。</span>
+            </div>
+            <div class="wiki-steps" aria-label="Wiki Mode 操作顺序">
+              <span>1 检查配置</span>
+              <span>2 编译批次</span>
+              <span>3 生成行动卡</span>
+              <span>4 接受入题库</span>
+            </div>
+            <div class="wiki-actions">
+              <button id="diagnosticsBtn" class="ghost-btn" type="button">检查配置</button>
+              <button id="wikiCompileBtn" class="accent-btn" type="button">编译收件箱批次</button>
+              <button id="wikiTodoBtn" class="ghost-btn" type="button">生成行动卡</button>
+            </div>
+            <div id="diagnosticsPanel" class="diagnostics-panel is-collapsed"></div>
+            <div id="wikiResult" class="wiki-result empty-state">还没有编译记录。先按顺序完成检查配置、编译批次和生成行动卡。</div>
+            <div id="wikiTodoList" class="wiki-todo-list"></div>
+          </section>
+
+          <section class="sidebar-view" data-view-panel="backlog">
+            <div class="panel-head">
+              <div>
+                <p class="panel-tag">阿福题库</p>
+                <h2>待排期选题</h2>
+              </div>
+              <span id="backlogHint">筛选后挑一张，拖到右侧周历。</span>
+            </div>
+            <div class="backlog-controls">
+              <div class="pager-group">
+                <button id="backlogPrevBtn" class="ghost-btn" type="button">上一页</button>
+                <div class="page-copy">
+                  <strong id="backlogPageInfo">第 1 / 1 页</strong>
+                  <span id="backlogWindowInfo">当前显示 0 / 0</span>
+                </div>
+                <button id="backlogNextBtn" class="ghost-btn" type="button">下一页</button>
+              </div>
+              <label class="page-size-control">
+                每页
+                <select id="backlogPageSize">
+                  <option value="2">2 条</option>
+                  <option value="3" selected>3 条</option>
+                  <option value="4">4 条</option>
+                  <option value="6">6 条</option>
+                </select>
+              </label>
+            </div>
+            <div id="backlogList" class="topic-list"></div>
+          </section>
+        </aside>
+
+        <section class="calendar-panel">
+          <div class="panel-head">
+            <div>
+              <p class="panel-tag">日历</p>
+              <h2>周排期面板</h2>
+            </div>
+            <span class="drop-tip">拖动卡片到当天列，补时间后可写入 Markdown、飞书或 macOS 日历。</span>
+          </div>
+          <div id="calendarGrid" class="calendar-grid"></div>
+        </section>
+      </section>
+    </main>
+
+    <div id="appToast" class="app-toast" hidden></div>
+
+    <dialog id="scheduleDialog" class="modal">
+      <form method="dialog" class="modal-card" id="scheduleForm">
+        <div class="modal-head">
+          <div>
+            <p class="panel-tag">排期</p>
+            <h3 id="scheduleTitle">排期选题</h3>
+          </div>
+          <button class="ghost-btn" type="button" data-close="scheduleDialog">关闭</button>
+        </div>
+        <label>
+          日期
+          <input id="scheduleDate" name="scheduleDate" type="date" required />
+        </label>
+        <div>
+          <span class="field-label">快捷时段</span>
+          <div id="scheduleSlotButtons" class="schedule-slots"></div>
+        </div>
+        <div class="time-grid">
+          <label>
+            开始时间
+            <input id="scheduleStart" name="scheduleStart" type="time" required />
+          </label>
+          <label>
+            结束时间
+            <input id="scheduleEnd" name="scheduleEnd" type="time" required />
+          </label>
+        </div>
+        <label>
+          日历同步
+          <select id="scheduleCalendarProvider">
+            <option value="none">只写 Markdown</option>
+            <option value="lark">同步到飞书日历</option>
+            <option value="macos">同步到 macOS 本地日历</option>
+          </select>
+        </label>
+        <p id="scheduleCalendarHint" class="form-hint">默认使用首次配置里的同步目标。</p>
+        <div class="modal-actions">
+          <button class="ghost-btn" type="button" data-close="scheduleDialog">取消</button>
+          <button class="accent-btn" type="submit">保存排期</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="disposeDialog" class="modal">
+      <form method="dialog" class="modal-card" id="disposeForm">
+        <div class="modal-head">
+          <div>
+            <p class="panel-tag">作废</p>
+            <h3 id="disposeTitle">处理选题</h3>
+          </div>
+          <button class="ghost-btn" type="button" data-close="disposeDialog">关闭</button>
+        </div>
+        <label>
+          动作
+          <select id="disposeAction" required>
+            <option value="拒绝">拒绝但保留卡片</option>
+            <option value="过期归档">删除并移出活动选题库</option>
+          </select>
+        </label>
+        <label>
+          原因
+          <textarea
+            id="disposeReason"
+            rows="5"
+            placeholder="这里不能为空。比如：热点窗口已过、证据不足、执行成本过高。"
+            required
+          ></textarea>
+        </label>
+        <label class="switch-line">
+          <input id="disposeSync" type="checkbox" checked />
+          <span>如果这个选题已经同步到外部日历，也一并删除日程</span>
+        </label>
+        <div class="modal-actions">
+          <button class="ghost-btn" type="button" data-close="disposeDialog">取消</button>
+          <button class="danger-btn" type="submit">确认处理</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="larkAuthDialog" class="modal">
+      <div class="modal-card auth-card">
+        <div class="modal-head">
+          <div>
+            <p class="panel-tag">飞书授权</p>
+            <h3>恢复日历同步</h3>
+          </div>
+          <button class="ghost-btn" type="button" data-close="larkAuthDialog">关闭</button>
+        </div>
+        <p id="larkAuthMessage" class="auth-copy">
+          页面会先打开飞书授权页。完成后，回来点“我已完成授权”。
+        </p>
+        <div class="auth-code-panel">
+          <span>授权码</span>
+          <strong id="larkAuthCode">----</strong>
+          <button id="copyLarkAuthCodeBtn" class="ghost-btn" type="button">复制授权码</button>
+        </div>
+        <a id="larkAuthLink" class="accent-btn auth-link" href="#" target="_blank" rel="noreferrer">打开飞书授权页</a>
+        <p id="larkAuthExpires" class="auth-expire">授权会话将在 10 分钟后过期。</p>
+        <div class="modal-actions">
+          <button id="larkAuthCompleteBtn" class="accent-btn" type="button">我已完成授权</button>
+        </div>
+      </div>
+    </dialog>
+
+    <template id="topicCardTemplate">
+      <article class="topic-card" draggable="true">
+        <div class="topic-top">
+          <span class="topic-priority"></span>
+          <span class="topic-stage"></span>
+        </div>
+        <h3 class="topic-title"></h3>
+        <p class="topic-excerpt"></p>
+        <div class="topic-meta">
+          <span class="topic-date"></span>
+          <span class="topic-sync"></span>
+        </div>
+        <div class="topic-tags"></div>
+        <div class="topic-actions">
+          <button class="mini-btn" data-action="schedule" type="button">排期</button>
+          <button class="mini-btn" data-action="unschedule" type="button">取消排期</button>
+          <button class="mini-btn" data-action="dispose" type="button">拒绝 / 删除</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="./app.js" defer></script>
+  </body>
+</html>

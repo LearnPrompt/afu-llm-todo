@@ -1,0 +1,14 @@
+{
+  "name": "topic-planner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "demo": "bash scripts/start-topic-planner.sh --demo",
+    "demo:reset": "node scripts/reset-demo.mjs",
+    "dev": "node server.mjs",
+    "start": "node server.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "verify": "node scripts/verify-config.mjs"
+  }
+}

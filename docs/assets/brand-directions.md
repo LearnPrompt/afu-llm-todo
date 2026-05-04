@@ -1,6 +1,6 @@
 # 管家阿福视觉方向
 
-当前主视觉为 `docs/assets/afu-hero.png`：卡通化人物双手接住紫色黑曜石晶体。
+当前主视觉为 `docs/assets/afu-hero.png`：使用最终生成图，卡通化人物双手接住紫色黑曜石晶体。
 
 视觉不做真人照片复刻，不复制 Obsidian 官方 logo，不使用 Batman 官方视觉。只借用“管家、晶体、Wiki 网络、行动卡、日历”这些抽象元素。
 

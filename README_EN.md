@@ -6,23 +6,23 @@
 
 ![Afu hero](docs/assets/afu-hero.png)
 
-<video src="docs/assets/afu-demo-10s.mp4" controls muted loop playsinline></video>
+## Demo Video
+
+<video src="docs/assets/afu-demo.mp4" controls muted loop playsinline></video>
 
 ## What Is Afu
 
-Afu is a local-first Skill for people who keep their notes, links, research, ideas, and project logs in Obsidian.
+Afu is a Skill for people who keep notes, links, research, ideas, and project logs in Obsidian.
 
 It is not another todo app.
 
-A normal todo list can remind you that something is unfinished. Afu helps one step earlier. It turns messy inbox material into a living Markdown Wiki, then lets the Wiki produce todo cards that can be scheduled onto a calendar.
+A normal todo list can remind you that something is unfinished. Afu helps one step earlier. It turns messy inbox material into a Markdown Wiki, then lets the Wiki produce todo cards that can be scheduled onto a calendar.
 
 ```text
 Inbox -> Wiki -> Todo Card -> Calendar
 ```
 
 ## Install For Your Agent
-
-If your agent supports Skill installation:
 
 ```bash
 npx skills add LearnPrompt/afu-llm-todo
@@ -36,7 +36,7 @@ Use Afu to process my Obsidian inbox. Compile the batch into a wiki, then genera
 
 ## Run The Local Demo
 
-The demo uses a sample vault. Your real notes stay untouched.
+The demo uses a sample vault. Your real notes stay where they are.
 
 ```bash
 git clone https://github.com/LearnPrompt/afu-llm-todo.git
@@ -47,7 +47,7 @@ npm run demo
 open http://localhost:4317
 ```
 
-## Your Vault Structure Can Be Different
+## Your Vault Does Not Need To Match Mine
 
 The sample vault uses:
 
@@ -67,13 +67,39 @@ Afu only needs three places:
 
 Everything else can be configured.
 
-## Why LLM Wiki
+## How It Works
 
-Inspired by Karpathy's LLM Wiki idea:
+Afu does not turn every inbox item directly into a task.
+
+It creates a middle layer first.
+
+```text
+Inbox
+  -> Wiki packet
+  -> Markdown Wiki
+  -> Todo Card
+  -> Calendar
+```
+
+That middle layer matters. Inbox material is usually messy. A link may contain half an idea. A note may only contain a clue. A project log may hide the real next step.
+
+Afu gives the agent a wiki-shaped place to settle those judgments before creating todo cards.
+
+## Backstory
+
+Afu started as a small tool in front of my own Obsidian vault.
+
+I had a familiar problem: the inbox was full of good material, but planning the week still meant reading everything again from scratch.
+
+Karpathy's LLM Wiki idea made the direction click.
 
 <https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f>
 
-The point is not to wrap another RAG interface around your files. The more interesting move is to let an agent maintain a readable, editable, linkable Markdown wiki, then let actions emerge from that wiki.
+Notes should not stay trapped in an inbox forever. And a wiki should not only be queried.
+
+It should produce action.
+
+That is Afu.
 
 ## More
 

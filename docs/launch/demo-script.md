@@ -2,7 +2,7 @@
 
 ## 10 秒短视频版
 
-文件：`docs/assets/afu-demo-10s.mp4`
+文件：`docs/assets/afu-demo.mp4`
 
 画面节奏：
 

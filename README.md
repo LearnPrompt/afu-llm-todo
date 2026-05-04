@@ -8,9 +8,9 @@
 
 ![Afu hero](docs/assets/afu-hero.png)
 
-<video src="docs/assets/afu-demo-10s.mp4" controls muted loop playsinline></video>
+## 演示视频
 
-## 先说人话
+<video src="docs/assets/afu-demo.mp4" controls muted loop playsinline></video>
 
 事情是这样的。
 
@@ -42,13 +42,6 @@ npx skills add LearnPrompt/afu-llm-todo
 用管家阿福整理我的 Obsidian 收件箱，先编译 Wiki，再给我生成这周的待办卡。
 ```
 
-阿福会让 Agent 按这个顺序工作：
-
-1. 找到你的收件箱、Wiki、待办卡目录。
-2. 把一批素材整理成 Wiki packet。
-3. 从 Wiki 里生成 Todo Card。
-4. 需要网页 UI 时，再启动本地排期面板。
-
 ## 想先看 UI
 
 Demo 跑在 sample vault 里，你自己的笔记先原地不动。
@@ -69,7 +62,7 @@ open http://localhost:4317
 
 你会看到三条 sample 素材。把它们送进 Wiki，生成待办卡，再拖进周排期。
 
-## 不要求你的 Vault 长得像我的
+## 不需要跟我一模一样的 Vault，你可以随便改
 
 默认 sample vault 用的是这几个目录：
 
@@ -89,34 +82,47 @@ open http://localhost:4317
 
 剩下的路径，都可以在配置里改。Markdown 还在你的本地，阿福只是帮 Agent 找到入口和写回位置。
 
-## LLM Wiki 是关键
+## 工作原理
 
-这里借了一点 Karpathy 的 LLM Wiki 思路。
+阿福不是直接把收件箱里的每条东西都变成任务。
+
+它先做一次中间整理。
+
+```text
+Inbox
+  -> Wiki packet
+  -> Markdown Wiki
+  -> Todo Card
+  -> Calendar
+```
+
+这一步很关键。
+
+因为收件箱里的东西通常是乱的。一个链接里可能只有半个观点，一段摘录里可能只有一个线索，一个项目记录里可能藏着真正要做的下一步。
+
+阿福会先把这些材料放进 Wiki 语境里，让 Agent 有地方沉淀判断。等 Wiki 里已经能看出方向了，再生成待办卡。
+
+所以它不是在帮你多列几个任务。
+
+它是在帮你把资料变成能动起来的东西。
+
+## 背后故事
+
+这个项目一开始不是为了发布。
+
+它只是我自己在 Obsidian 前面补的一层小工具。因为我真的经常遇到一个问题，收件箱里明明有很多好东西，但每次要排这一周的时候，还是得从头翻一遍。
+
+翻着翻着就累了。
+
+后来 Karpathy 提到 LLM Wiki，我一下子觉得这个方向很对。资料不应该永远躺在收件箱里，也不应该每次都靠临时搜索重新理解一遍。更好的方式，是让 Agent 把它们整理成一个会生长的 Wiki。
 
 参考：<https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f>
 
-我理解这件事的重点，不是再套一个 RAG 壳，也不是每次问问题都临时翻资料。
+再往前走一步，Wiki 不应该只是被查询。
 
-更有意思的是，让 Agent 持续维护一个能读、能改、能回链的 Markdown Wiki。然后下一步行动，不是凭空从 Todo 里冒出来，而是从 Wiki 里长出来。
+它应该长出行动。
 
-这就是 Afu 的核心。
-
-```text
-收件箱里的材料
-  -> 变成 Wiki
-  -> 长出 Todo Card
-  -> 排进 Calendar
-```
-
-## 现在先专注一件事
-
-Afu 现在先服务个人 Obsidian 工作流。
-
-它适合你把资料、灵感、项目记录、阅读摘录都丢进 Obsidian，然后希望 Agent 帮你把它们整理成一周能推进的事情。
-
-团队协作、云端数据库、复杂权限，这些先不急。
-
-先把自己的收件箱救出来。
+这就是 Afu。
 
 ## 更多
 

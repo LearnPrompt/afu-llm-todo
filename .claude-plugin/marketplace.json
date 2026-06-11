@@ -1,0 +1,16 @@
+{
+  "name": "afu-llm-todo",
+  "owner": { "name": "LearnPrompt", "url": "https://github.com/LearnPrompt" },
+  "metadata": { "description": "Marketplace hosting the Afu LLM-Todo plugin." },
+  "plugins": [
+    {
+      "name": "afu-llm-todo",
+      "description": "管家阿福 · Afu — LLM Todo for Obsidian agents。站在 Vault 门口的管家:先把收件箱材料整理成 Wiki,再把 Wiki 里长出来的判断变成可排进日历的待办卡。Inbox -> Wiki -> Todo Card -> Calendar。",
+      "version": "1.0.0",
+      "author": { "name": "LearnPrompt", "url": "https://github.com/LearnPrompt" },
+      "source": "./",
+      "category": "productivity",
+      "homepage": "https://github.com/LearnPrompt/afu-llm-todo"
+    }
+  ]
+}

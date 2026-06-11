@@ -6,13 +6,18 @@
 >
 > Inbox -> Wiki -> Todo Card -> Calendar
 
+[![Agent Skills](https://img.shields.io/badge/Agent%20Skills-afu--llm--todo-blueviolet)](SKILL.md)
+[![skills.sh](https://skills.sh/b/LearnPrompt/afu-llm-todo)](https://skills.sh/LearnPrompt/afu-llm-todo)
+[![Release](https://img.shields.io/github/v/release/LearnPrompt/afu-llm-todo)](https://github.com/LearnPrompt/afu-llm-todo/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 ![Afu hero](docs/assets/afu-hero.png)
 
 ## 演示视频
 
-<video src="https://github.com/LearnPrompt/afu-llm-todo/releases/download/demo-video-v1/afu-demo.mp4" poster="docs/assets/afu-demo-poster.png" controls muted loop playsinline></video>
+[![Afu 演示视频](docs/assets/afu-demo-poster.png)](https://github.com/LearnPrompt/afu-llm-todo/releases/download/demo-video-v1/afu-demo.mp4)
 
-[如果播放器没有显示，点这里看演示视频](https://github.com/LearnPrompt/afu-llm-todo/releases/download/demo-video-v1/afu-demo.mp4)
+<sub>▲ 点击海报播放演示视频（GitHub README 不渲染外链 video 标签，所以用海报直链）</sub>
 
 事情是这样的。
 

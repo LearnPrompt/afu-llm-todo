@@ -1,6 +1,10 @@
 ---
 name: afu-llm-todo
-description: Turn an Obsidian inbox into a living wiki, then into todo cards for this week.
+description: |
+  管家阿福(Afu)——把 Obsidian 收件箱变成活的 Wiki,再变成本周待办卡和周历:Inbox -> Wiki -> Todo Card -> Calendar 一条线。本地优先,Markdown 是唯一真源,收件箱原文不改写,导入/排期/作废/编译全部写操作日志可回滚。
+  触发词包括但不限于:整理我的 Obsidian 收件箱、inbox 清零、把这批资料编译成 Wiki、从笔记生成本周待办、待办卡排进周历、阿福帮我理一下 vault。
+  即使用户只是说"我的 Obsidian 堆了一堆没处理的东西",也应该触发。
+  不要用于:不涉及 Obsidian/Markdown vault 的普通待办管理(用一般 todo 工具);改写、润色、总结笔记原文(阿福只整理位置,不动原文);Notion 等非 Markdown 知识库。
 ---
 # Afu · LLM Todo
 

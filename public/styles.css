@@ -266,9 +266,29 @@ body {
 
 .hero-mascot {
   width: 100%;
+  max-height: 360px;
   border-radius: 20px;
-  object-fit: cover;
+  object-fit: contain;
+  object-position: center bottom;
   display: block;
+}
+
+.hero-copy-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.hero-copy-row .hero-copy {
+  margin: 0;
+}
+
+.hero-config-btn {
+  white-space: nowrap;
+  font-size: 13px;
+  padding: 6px 14px;
+  flex-shrink: 0;
 }
 
 .planner-settings-details {

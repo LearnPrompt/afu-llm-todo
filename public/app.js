@@ -133,6 +133,8 @@ const elements = {
   topicCardTemplate: document.querySelector("#topicCardTemplate"),
   appToast: document.querySelector("#appToast"),
   themeToggleBtn: document.querySelector("#themeToggleBtn"),
+  heroConfigBtn: document.querySelector("#heroConfigBtn"),
+  plannerSettingsDetails: document.querySelector("#plannerSettingsDetails"),
 };
 
 boot();
@@ -225,6 +227,12 @@ function bindEvents() {
 
   elements.refreshBtn.addEventListener("click", () => loadTopics());
   elements.themeToggleBtn?.addEventListener("click", () => toggleTheme());
+  elements.heroConfigBtn?.addEventListener("click", () => {
+    if (elements.plannerSettingsDetails) {
+      elements.plannerSettingsDetails.open = true;
+      elements.plannerSettingsDetails.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  });
   elements.diagnosticsBtn?.addEventListener("click", () => toggleDiagnostics());
   elements.plannerSettingsForm?.addEventListener("submit", submitPlannerSettings);
   elements.prevWeekBtn.addEventListener("click", () => {

@@ -350,12 +350,20 @@
             <option value="过期归档">删除并移出活动选题库</option>
           </select>
         </label>
+        <div class="field-label">原因</div>
+        <div id="disposeReasonChips" class="dispose-reason-chips">
+          <button type="button" class="reason-chip" data-reason="热点窗口已过">热点窗口已过</button>
+          <button type="button" class="reason-chip" data-reason="与已有选题重复">与已有选题重复</button>
+          <button type="button" class="reason-chip" data-reason="信息/证据不足">信息/证据不足</button>
+          <button type="button" class="reason-chip" data-reason="执行成本过高">执行成本过高</button>
+          <button type="button" class="reason-chip" data-reason="方向不符">方向不符</button>
+          <button type="button" class="reason-chip" data-reason="内容已过时">内容已过时</button>
+        </div>
         <label>
-          原因
           <textarea
             id="disposeReason"
-            rows="5"
-            placeholder="这里不能为空。比如：热点窗口已过、证据不足、执行成本过高。"
+            rows="4"
+            placeholder="点上方标签快速填入，或自己写。比如：热点窗口已过、证据不足、执行成本过高。"
             required
           ></textarea>
         </label>

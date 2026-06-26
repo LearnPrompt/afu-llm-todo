@@ -840,7 +840,8 @@ button:disabled {
 
 .inbox-batch-toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 120px auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
   gap: 10px;
   margin-bottom: 14px;
   padding: 12px;
@@ -864,6 +865,10 @@ button:disabled {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.45;
+}
+
+.inbox-batch-toolbar .batch-info {
+  grid-column: 1 / -1;
 }
 
 .inbox-select-line {
@@ -1007,11 +1012,16 @@ button:disabled {
 }
 
 .page-size-control {
-  width: 98px;
-  display: grid;
-  gap: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--muted);
   font-size: 12px;
+  white-space: nowrap;
+}
+
+.page-size-control select {
+  width: auto;
 }
 
 .topic-list {
@@ -1204,6 +1214,39 @@ button:disabled {
   background: var(--accent-soft);
   color: var(--accent);
   border-color: rgba(182, 82, 45, 0.22);
+}
+
+.dispose-reason-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.reason-chip {
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(36, 25, 13, 0.06);
+  color: var(--muted);
+  font-size: 12px;
+  border: 1px solid transparent;
+  cursor: pointer;
+}
+
+.reason-chip:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.reason-chip.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: rgba(182, 82, 45, 0.22);
+}
+
+.topic-card[data-overdue="true"] .topic-stage {
+  background: rgba(180, 40, 30, 0.14);
+  color: #b4281e;
 }
 
 .topic-tags {

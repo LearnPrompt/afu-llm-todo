@@ -107,6 +107,7 @@ const elements = {
   disposeTitle: document.querySelector("#disposeTitle"),
   disposeAction: document.querySelector("#disposeAction"),
   disposeReason: document.querySelector("#disposeReason"),
+  disposeReasonChips: document.querySelector("#disposeReasonChips"),
   disposeSync: document.querySelector("#disposeSync"),
   dailyInboxDialog: document.querySelector("#dailyInboxDialog"),
   dailyInboxTitle: document.querySelector("#dailyInboxTitle"),
@@ -266,6 +267,14 @@ function bindEvents() {
     );
   });
   elements.disposeForm.addEventListener("submit", submitDispose);
+  elements.disposeReasonChips?.addEventListener("click", (event) => {
+    const chip = event.target.closest(".reason-chip");
+    if (!chip) return;
+    elements.disposeReason.value = chip.dataset.reason || "";
+    elements.disposeReasonChips.querySelectorAll(".reason-chip").forEach((btn) => {
+      btn.classList.toggle("is-active", btn === chip);
+    });
+  });
   elements.larkAuthCompleteBtn.addEventListener("click", () => finishLarkRepairFlow());
   elements.copyLarkAuthCodeBtn.addEventListener("click", () => copyLarkAuthCode());
 
@@ -636,6 +645,7 @@ function renderCalendar() {
 
   for (const topic of state.topics) {
     if (!topic.scheduledDate) continue;
+    if (["已拒绝", "已归档", "已发布"].includes(topic.stage)) continue;
     if (!topicsByDate.has(topic.scheduledDate)) continue;
     if (!matchesFilter(topic)) continue;
     topicsByDate.get(topic.scheduledDate).push(topic);
@@ -697,7 +707,13 @@ function createTopicCard(topic, options = {}) {
   card.draggable = true;
 
   priority.textContent = topic.priority || "优先级";
-  stage.textContent = topic.stage;
+  const overdue = isTopicOverdue(topic);
+  if (overdue) {
+    card.dataset.overdue = "true";
+    stage.textContent = "已过期";
+  } else {
+    stage.textContent = topic.stage;
+  }
   title.textContent = stripTopicPrefix(topic.title);
   title.title = stripTopicPrefix(topic.title);
   excerpt.textContent = topic.excerpt || "暂无摘要";
@@ -943,6 +959,7 @@ function openDisposeDialog(topic) {
   elements.disposeTitle.textContent = `处理：${topic.title}`;
   elements.disposeAction.value = "拒绝";
   elements.disposeReason.value = "";
+  elements.disposeReasonChips?.querySelectorAll(".reason-chip").forEach((btn) => btn.classList.remove("is-active"));
   elements.disposeSync.checked = Boolean(topic.larkEventId || topic.macosEventId);
   elements.disposeSync.disabled = !(topic.larkEventId || topic.macosEventId);
   elements.disposeDialog.showModal();
@@ -1004,10 +1021,6 @@ async function startLarkRepairFlow() {
     state.larkAuthFlow = data.flow || null;
     renderLarkAuthDialog();
     elements.larkAuthDialog.showModal();
-
-    if (state.larkAuthFlow?.verificationUrl) {
-      window.open(state.larkAuthFlow.verificationUrl, "_blank", "noopener,noreferrer");
-    }
   } catch (error) {
     alert(error.message);
   } finally {
@@ -1046,7 +1059,7 @@ function renderLarkAuthDialog() {
   elements.larkAuthLink.href = flow.verificationUrl || "#";
   elements.larkAuthLink.setAttribute("aria-disabled", flow.verificationUrl ? "false" : "true");
   elements.larkAuthMessage.textContent =
-    "新窗口会打开飞书授权页。完成确认后，回到这里点击“我已完成授权”。";
+    "点下方按钮打开飞书授权页（只需打开一次）。完成确认后回到这里点“我已完成授权”。如果页面提示链接已失效，多半是 lark-cli 版本过旧，请更新后重试。";
   elements.larkAuthExpires.textContent = `本次授权会话将在 ${Math.round((flow.expiresIn || 600) / 60)} 分钟内失效。`;
 }
 
@@ -1058,7 +1071,13 @@ function renderLarkSetupPanel() {
   if (!enabled) return;
 
   const view = getLarkConnectorView(state.lark);
-  elements.larkSetupStatus.textContent = view.message;
+  const cliVersion = state.lark?.cliVersion;
+  const versionNote = cliVersion === undefined
+    ? ""
+    : cliVersion
+      ? ` · lark-cli ${cliVersion}`
+      : " · 未检测到 lark-cli 版本，建议更新到最新版（npm i -g @larksuite/lark-cli）";
+  elements.larkSetupStatus.textContent = `${view.message}${versionNote}`;
   elements.larkSetupBadge.textContent = view.badge;
   elements.larkSetupBadge.className = `status-badge ${view.tone}`;
   elements.larkSetupAccount.textContent = view.account;
@@ -1212,8 +1231,8 @@ async function importInboxCandidate(candidate) {
     clearBacklogFilters();
     state.selectedInboxPaths.delete(candidate.sourcePath);
     await loadTopics();
-    state.workspaceView = "inbox";
-    setWorkspaceView("inbox");
+    state.workspaceView = "backlog";
+    setWorkspaceView("backlog");
     if (data.merged) {
       showTopicToast(`已合并到「${stripTopicPrefix(data.mergedTitle)}」`, state.lastCreatedTopic);
     }
@@ -1259,8 +1278,8 @@ async function importSelectedInboxCandidates(sourcePaths = Array.from(state.sele
     clearBacklogFilters();
 
     await loadTopics();
-    state.workspaceView = "inbox";
-    setWorkspaceView("inbox");
+    state.workspaceView = "backlog";
+    setWorkspaceView("backlog");
     const failedCount = (data.failed || []).length;
     const message = failedCount
       ? `已转入排期池 ${data.created.length} 条，失败 ${failedCount} 条。`
@@ -1285,7 +1304,10 @@ function advanceScheduleQueue() {
     showToast(`排期队列已完成`);
     return;
   }
-  const topic = (state.topics || []).find((t) => t.path === next.path);
+  const topic = (state.topics || []).find((t) => t.path === next.path)
+    || (next.title
+      ? (state.topics || []).find((t) => stripTopicPrefix(t.title) === stripTopicPrefix(next.title))
+      : null);
   if (!topic) {
     advanceScheduleQueue();
     return;
@@ -1706,6 +1728,17 @@ function formatDate(date) {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function isTopicOverdue(topic) {
+  if (!topic.scheduledDate) return false;
+  if (["已拒绝", "已归档", "已发布"].includes(topic.stage)) return false;
+  const now = new Date();
+  if (topic.scheduledEnd && /^\d{2}:\d{2}$/.test(topic.scheduledEnd)) {
+    const end = new Date(`${topic.scheduledDate}T${topic.scheduledEnd}`);
+    return !Number.isNaN(end.getTime()) && end < now;
+  }
+  return topic.scheduledDate < formatDate(now);
 }
 
 function readStoredBacklogPageSize() {

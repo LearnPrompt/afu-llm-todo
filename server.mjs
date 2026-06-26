@@ -493,9 +493,10 @@ async function importInboxCandidateBatch(payload) {
     try {
       const result = await importInboxCandidate({ sourcePath });
       created.push({
-        path: result.created,
+        path: result.created || result.mergedInto,
         title: result.topic?.title || "",
         sourcePath,
+        merged: Boolean(result.merged),
       });
     } catch (error) {
       failed.push({
@@ -1172,6 +1173,24 @@ function compareTopics(left, right) {
   return right.priority.length - left.priority.length || left.title.localeCompare(right.title, "zh-CN");
 }
 
+let larkCliVersionCache = { value: undefined, expiresAt: 0 };
+
+async function getLarkCliVersion() {
+  if (Date.now() < larkCliVersionCache.expiresAt && larkCliVersionCache.value !== undefined) {
+    return larkCliVersionCache.value;
+  }
+  let version = null;
+  try {
+    const stdout = await execText("lark-cli", ["--version"], { timeoutMs: 15_000 });
+    const match = String(stdout).match(/\d+\.\d+\.\d+/);
+    version = match ? match[0] : (stdout.trim() || null);
+  } catch {
+    version = null;
+  }
+  larkCliVersionCache = { value: version, expiresAt: Date.now() + 300_000 };
+  return version;
+}
+
 async function getLarkStatus() {
   if (Date.now() < authCache.expiresAt && authCache.value) {
     return authCache.value;
@@ -1185,10 +1204,12 @@ async function getLarkStatus() {
       value = await probeLarkAvailability(value);
     }
 
+    value.cliVersion = await getLarkCliVersion();
     authCache = { value, expiresAt: Date.now() + 60_000 };
     return value;
   } catch (error) {
     const value = createLarkUnavailableStatus(error);
+    value.cliVersion = await getLarkCliVersion();
     authCache = { value, expiresAt: Date.now() + 15_000 };
     return value;
   }

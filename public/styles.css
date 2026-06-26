@@ -264,6 +264,13 @@ body {
   align-content: start;
 }
 
+.hero-mascot {
+  width: 100%;
+  border-radius: 20px;
+  object-fit: cover;
+  display: block;
+}
+
 .planner-settings-details {
   border-radius: var(--radius-lg);
   background: var(--panel-strong);
@@ -609,7 +616,7 @@ button:disabled {
 
 .wiki-actions {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
   margin-bottom: 14px;
 }
@@ -704,6 +711,8 @@ button:disabled {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 10px;
+  min-height: 400px;
+  align-content: start;
 }
 
 .inbox-batch-toolbar {

@@ -284,9 +284,9 @@ async function loadTopics() {
     state.settings = payload.settings || null;
     state.configPath = payload.configPath || "";
     state.lark = payload.lark || null;
-    if (isSampleWorkspace() && state.inboxPageSize !== 3) {
-      state.inboxPageSize = 3;
-      elements.inboxPageSize.value = "3";
+    if (isSampleWorkspace() && state.inboxPageSize > 5) {
+      state.inboxPageSize = 5;
+      elements.inboxPageSize.value = "5";
     }
     pruneSelectedInboxPaths();
     render();
@@ -1332,6 +1332,7 @@ async function loadDiagnostics() {
     state.diagnostics = data;
     renderDiagnostics();
     elements.wikiResult.textContent = `当前模式：${data.settings?.wikiMode || 'off'}；日历目标：${data.settings?.calendarProvider || 'none'}。`;
+    elements.wikiResult.classList.remove("empty-state");
   } catch (error) {
     elements.diagnosticsPanel.innerHTML = `<div class="diagnostics-summary warn">${escapeHtml(error.message)}</div>`;
   } finally {
@@ -1706,7 +1707,7 @@ function readStoredBacklogPageSize() {
 
 function readInboxPageSizeValue(value) {
   const pageSize = Number(value);
-  return [3, 20, 50, 100].includes(pageSize) ? pageSize : DEFAULT_INBOX_PAGE_SIZE;
+  return [5, 10, 20].includes(pageSize) ? pageSize : DEFAULT_INBOX_PAGE_SIZE;
 }
 
 function readStoredInboxPageSize() {

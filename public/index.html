@@ -18,31 +18,34 @@
     <main class="app-shell">
       <section class="hero">
         <div class="hero-main">
-          <p class="eyebrow">AFU · LLM TODO FOR OBSIDIAN · 管家阿福</p>
+          <div class="hero-eyebrow-row">
+            <p class="eyebrow">AFU · LLM TODO FOR OBSIDIAN · 管家阿福</p>
+            <button id="themeToggleBtn" class="theme-toggle" type="button">◑ 深色</button>
+          </div>
           <h1>谁不想拥有一个自己的管家阿福呢？</h1>
           <p class="hero-copy">
-            先把 Obsidian 收件箱编译成 Wiki，再生成本周行动卡，最后拖进日历。
+            收件箱素材一键转卡，重复内容自动合并，再排进周历。
           </p>
           <div class="hero-flow" aria-label="管家阿福工作流">
             <div class="flow-step">
               <span>01</span>
               <strong>接入工作区</strong>
-              <p>选择 Vault、选题库、收件箱和 Wiki。</p>
+              <p>选择 Vault 根目录和素材目录，保存即生效。</p>
             </div>
             <div class="flow-step">
               <span>02</span>
-              <strong>编译 Wiki</strong>
-              <p>把粗素材整理成可回链知识包。</p>
+              <strong>转卡去重</strong>
+              <p>素材一键转成选题卡，重复内容自动追加合并。</p>
             </div>
             <div class="flow-step">
               <span>03</span>
-              <strong>生成行动</strong>
-              <p>从 Wiki 长出可接受的 Todo 候选。</p>
+              <strong>挑题排期</strong>
+              <p>从题库挑选卡片，拖进周历安排时间。</p>
             </div>
             <div class="flow-step">
               <span>04</span>
-              <strong>排期同步</strong>
-              <p>拖进周历，回写 Markdown 或日历。</p>
+              <strong>同步写回</strong>
+              <p>回写 Markdown，可选同步外部日历。</p>
             </div>
           </div>
           <div class="hero-meta">
@@ -71,89 +74,73 @@
           </div>
         </div>
         <div class="hero-side">
-          <form id="plannerSettingsForm" class="planner-settings-card">
-            <div class="panel-head panel-head-compact">
-              <div>
-                <p class="panel-tag">首次配置</p>
-                <h2>先接入你的工作区</h2>
-              </div>
-              <span id="plannerSettingsHint">确认目录和同步目标，保存后刷新数据。</span>
-            </div>
-            <label>
-              Vault 根目录
-              <input id="plannerVaultRoot" type="text" placeholder="/Users/you/ObsidianVault" required />
-            </label>
-            <div class="settings-grid">
+          <details id="plannerSettingsDetails" class="planner-settings-details">
+            <summary class="settings-summary">
+              <span class="settings-summary-label">工作区设置</span>
+              <span id="plannerSettingsHint" class="settings-summary-hint">确认目录和同步目标，保存后刷新数据。</span>
+            </summary>
+            <form id="plannerSettingsForm" class="planner-settings-card">
               <label>
-                选题目录
-                <input id="plannerTopicDir" type="text" placeholder="15_自媒体/选题库" required />
+                Vault 根目录
+                <input id="plannerVaultRoot" type="text" placeholder="/Users/you/ObsidianVault" required />
               </label>
-              <label>
-                收件箱目录
-                <input id="plannerInboxDir" type="text" placeholder="00_收件箱" required />
-              </label>
-              <label>
-                归档目录
-                <input id="plannerArchiveDir" type="text" placeholder="99_系统/归档/选题占位" required />
-              </label>
-              <label>
-                同步目标
-                <select id="plannerCalendarProvider">
-                  <option value="none">只写 Markdown，不同步日历</option>
-                  <option value="lark">同步到飞书日历</option>
-                  <option value="macos">同步到 macOS 本地日历</option>
-                </select>
-              </label>
-              <div id="larkSetupPanel" class="lark-setup-panel lark-connector-card" hidden>
-                <div class="connector-top">
-                  <div>
-                    <p class="panel-tag">飞书连接器</p>
-                    <strong>飞书日历</strong>
-                    <span id="larkSetupStatus">正在检测 CLI、授权和主日历。</span>
+              <div class="settings-grid">
+                <label>
+                  选题目录
+                  <input id="plannerTopicDir" type="text" placeholder="15_自媒体/选题库" required />
+                </label>
+                <label>
+                  收件箱目录
+                  <input id="plannerInboxDir" type="text" placeholder="00_收件箱" required />
+                </label>
+                <label>
+                  归档目录
+                  <input id="plannerArchiveDir" type="text" placeholder="99_系统/归档/选题占位" required />
+                </label>
+                <label>
+                  同步目标
+                  <select id="plannerCalendarProvider">
+                    <option value="none">只写 Markdown，不同步日历</option>
+                    <option value="lark">同步到飞书日历</option>
+                    <option value="macos">同步到 macOS 本地日历</option>
+                  </select>
+                </label>
+                <div id="larkSetupPanel" class="lark-setup-panel lark-connector-card" hidden>
+                  <div class="connector-top">
+                    <div>
+                      <p class="panel-tag">飞书连接器</p>
+                      <strong>飞书日历</strong>
+                      <span id="larkSetupStatus">正在检测 CLI、授权和主日历。</span>
+                    </div>
+                    <span id="larkSetupBadge" class="status-badge">检测中</span>
                   </div>
-                  <span id="larkSetupBadge" class="status-badge">检测中</span>
+                  <div id="larkSetupAccount" class="connector-account">账号和主日历会在检测后显示。</div>
+                  <div class="connector-actions">
+                    <button id="larkSetupAuthBtn" class="accent-btn" type="button">连接飞书</button>
+                    <details id="larkSetupDetails" class="connector-details">
+                      <summary>配置详情</summary>
+                      <p>第一次使用时先初始化 CLI，再授权用户日历权限。授权成功后排期可同步到飞书主日历。</p>
+                      <div class="setup-command">
+                        <code>lark-cli config init --new</code>
+                        <button id="copyLarkConfigBtn" class="mini-btn" type="button">复制</button>
+                      </div>
+                      <div class="setup-command">
+                        <code>lark-cli auth login --domain calendar</code>
+                        <button id="copyLarkAuthBtn" class="mini-btn" type="button">复制</button>
+                      </div>
+                    </details>
+                  </div>
                 </div>
-                <div id="larkSetupAccount" class="connector-account">账号和主日历会在检测后显示。</div>
-                <div class="connector-actions">
-                  <button id="larkSetupAuthBtn" class="accent-btn" type="button">连接飞书</button>
-                  <details id="larkSetupDetails" class="connector-details">
-                    <summary>配置详情</summary>
-                    <p>第一次使用时先初始化 CLI，再授权用户日历权限。授权成功后排期可同步到飞书主日历。</p>
-                    <div class="setup-command">
-                      <code>lark-cli config init --new</code>
-                      <button id="copyLarkConfigBtn" class="mini-btn" type="button">复制</button>
-                    </div>
-                    <div class="setup-command">
-                      <code>lark-cli auth login --domain calendar</code>
-                      <button id="copyLarkAuthBtn" class="mini-btn" type="button">复制</button>
-                    </div>
-                  </details>
-                </div>
+                <label>
+                  macOS 日历名
+                  <input id="plannerMacosCalendarName" type="text" placeholder="留空则使用第一个本地日历" />
+                </label>
               </div>
-              <label>
-                macOS 日历名
-                <input id="plannerMacosCalendarName" type="text" placeholder="留空则使用第一个本地日历" />
-              </label>
-              <label>
-                Wiki Mode
-                <select id="plannerWikiMode">
-                  <option value="off">关闭 Wiki Mode</option>
-                  <option value="agent">Agent 编译模式</option>
-                </select>
-              </label>
-              <label>
-                Wiki 目录
-                <input id="plannerWikiDir" type="text" placeholder="30_研究/内容Wiki" />
-              </label>
-              <label>
-                每日推荐容量
-                <input id="plannerDailyCapacity" type="number" min="1" max="12" step="1" placeholder="2" />
-              </label>
-            </div>
-            <div class="settings-actions">
-              <button class="accent-btn" type="submit">保存目录设置</button>
-            </div>
-          </form>
+              <div class="settings-actions">
+                <button class="accent-btn" type="submit">保存目录设置</button>
+              </div>
+            </form>
+          </details>
         </div>
       </section>
 
@@ -180,7 +167,7 @@
         <aside class="backlog-panel">
           <div class="workspace-tabs" role="tablist" aria-label="阿福素材面板">
             <button class="workspace-tab is-active" type="button" data-workspace-view="inbox">收件箱</button>
-            <button class="workspace-tab" type="button" data-workspace-view="wiki">Wiki</button>
+            <button class="workspace-tab" type="button" data-workspace-view="wiki">诊断</button>
             <button class="workspace-tab" type="button" data-workspace-view="backlog">题库</button>
           </div>
 
@@ -190,7 +177,7 @@
                 <p class="panel-tag">阿福收件箱</p>
                 <h2>待转选题候选</h2>
               </div>
-              <span id="inboxHint">直接转卡适合单条素材快速排期；Wiki 适合多条素材先合并判断再转卡。</span>
+              <span id="inboxHint">单条素材快速进入排期；有重复内容会自动合并。</span>
             </div>
             <div class="inbox-batch-toolbar">
               <div class="pager-group inbox-pager">
@@ -204,16 +191,14 @@
               <label class="page-size-control">
                 每页
                 <select id="inboxPageSize">
+                  <option value="5">5 条</option>
+                  <option value="10">10 条</option>
                   <option value="20" selected>20 条</option>
-                  <option value="3">3 条</option>
-                  <option value="50">50 条</option>
-                  <option value="100">100 条</option>
                 </select>
               </label>
               <div class="inbox-batch-actions">
                 <button id="inboxSelectPageBtn" class="ghost-btn" type="button">本页全选</button>
                 <button id="inboxImportBatchBtn" class="accent-btn" type="button">批量转卡</button>
-                <button id="inboxWikiBatchBtn" class="ghost-btn" type="button">加入 Wiki 批次</button>
               </div>
               <div id="inboxBatchInfo" class="batch-info">未选择素材</div>
             </div>
@@ -223,24 +208,16 @@
           <section class="sidebar-view wiki-panel" data-view-panel="wiki">
             <div class="panel-head panel-head-compact">
               <div>
-                <p class="panel-tag">LLM Todo</p>
-                <h2>Wiki Mode</h2>
+                <p class="panel-tag">阿福诊断</p>
+                <h2>配置 &amp; 状态</h2>
               </div>
-              <span id="wikiHint">Wiki 会先批量编译素材、合并重复信息，再生成更有理由的行动卡。</span>
-            </div>
-            <div class="wiki-steps" aria-label="Wiki Mode 操作顺序">
-              <span>1 检查配置</span>
-              <span>2 编译批次</span>
-              <span>3 生成行动卡</span>
-              <span>4 接受入题库</span>
+              <span id="wikiHint">素材重复合并已内置于转卡流程，无需手动编译。</span>
             </div>
             <div class="wiki-actions">
-              <button id="diagnosticsBtn" class="ghost-btn" type="button">检查配置</button>
-              <button id="wikiCompileBtn" class="accent-btn" type="button">编译收件箱批次</button>
-              <button id="wikiTodoBtn" class="ghost-btn" type="button">生成行动卡</button>
+              <button id="diagnosticsBtn" class="ghost-btn" type="button">展开配置</button>
             </div>
             <div id="diagnosticsPanel" class="diagnostics-panel is-collapsed"></div>
-            <div id="wikiResult" class="wiki-result empty-state">还没有编译记录。先按顺序完成检查配置、编译批次和生成行动卡。</div>
+            <div id="wikiResult" class="wiki-result empty-state">点击"展开配置"检查 Vault 路径、收件箱目录等设置。</div>
             <div id="wikiTodoList" class="wiki-todo-list"></div>
           </section>
 
@@ -290,6 +267,31 @@
 
     <div id="appToast" class="app-toast" hidden></div>
 
+    <dialog id="dailyInboxDialog" class="modal">
+      <div class="modal-card daily-inbox-card">
+        <div class="modal-head">
+          <div>
+            <p class="panel-tag">每日收件箱</p>
+            <h3 id="dailyInboxTitle">处理当天收件箱</h3>
+          </div>
+          <button class="ghost-btn" type="button" data-close="dailyInboxDialog">稍后</button>
+        </div>
+        <p id="dailyInboxSummary" class="daily-inbox-summary">正在检查当天候选。</p>
+        <div id="dailyInboxList" class="daily-inbox-list"></div>
+        <div id="dailyInboxConfirm" class="daily-inbox-confirm" hidden>
+          <p id="dailyInboxConfirmMsg"></p>
+          <div class="modal-actions">
+            <button id="dailyInboxConfirmCancelBtn" class="ghost-btn" type="button">返回</button>
+            <button id="dailyInboxConfirmOkBtn" class="accent-btn" type="button">确认转卡</button>
+          </div>
+        </div>
+        <div id="dailyInboxActions" class="modal-actions daily-inbox-actions">
+          <button id="dailyInboxSelectAllBtn" class="ghost-btn" type="button">全选当天</button>
+          <button id="dailyInboxImportBtn" class="accent-btn" type="button">批量转卡</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="scheduleDialog" class="modal">
       <form method="dialog" class="modal-card" id="scheduleForm">
         <div class="modal-head">
@@ -326,6 +328,7 @@
           </select>
         </label>
         <p id="scheduleCalendarHint" class="form-hint">默认使用首次配置里的同步目标。</p>
+        <div id="scheduleDaySidebar" class="schedule-day-sidebar"></div>
         <div class="modal-actions">
           <button class="ghost-btn" type="button" data-close="scheduleDialog">取消</button>
           <button class="accent-btn" type="submit">保存排期</button>

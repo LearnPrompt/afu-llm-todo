@@ -2,7 +2,6 @@ const BACKLOG_PAGE_SIZE_KEY = "topic-planner.backlog-page-size";
 const INBOX_PAGE_SIZE_KEY = "topic-planner.inbox-page-size";
 const DEFAULT_BACKLOG_PAGE_SIZE = 3;
 const DEFAULT_INBOX_PAGE_SIZE = 20;
-const DEFAULT_WIKI_TODO_PAGE_SIZE = 20;
 const RECOMMENDED_DAILY_CAPACITY = 2;
 const DEFAULT_SCHEDULE_TIME_SLOTS = [
   { label: "上午深度", start: "09:30", end: "11:00" },
@@ -14,7 +13,6 @@ const state = {
   topics: [],
   inboxCandidates: [],
   inboxSummary: null,
-  wikiTodos: [],
   diagnostics: null,
   diagnosticsExpanded: false,
   settings: null,
@@ -29,16 +27,16 @@ const state = {
   inboxPage: 1,
   inboxPageSize: readStoredInboxPageSize(),
   selectedInboxPaths: new Set(),
-  wikiBatchSourcePaths: [],
-  wikiBatchTitles: [],
-  wikiTodoPage: 1,
-  wikiTodoPageSize: DEFAULT_WIKI_TODO_PAGE_SIZE,
   lastCreatedTopic: null,
   recentTopicPaths: [],
   toast: null,
   workspaceView: "inbox",
   scheduleTarget: null,
   disposeTarget: null,
+  dailyInboxDialogShown: false,
+  dailyInboxDate: "",
+  dailyInboxPendingPaths: null,
+  scheduleQueue: [],
 };
 
 const elements = {
@@ -83,14 +81,9 @@ const elements = {
   copyLarkConfigBtn: document.querySelector("#copyLarkConfigBtn"),
   copyLarkAuthBtn: document.querySelector("#copyLarkAuthBtn"),
   plannerMacosCalendarName: document.querySelector("#plannerMacosCalendarName"),
-  plannerWikiMode: document.querySelector("#plannerWikiMode"),
-  plannerWikiDir: document.querySelector("#plannerWikiDir"),
-  plannerDailyCapacity: document.querySelector("#plannerDailyCapacity"),
   plannerSettingsHint: document.querySelector("#plannerSettingsHint"),
   diagnosticsBtn: document.querySelector("#diagnosticsBtn"),
   diagnosticsPanel: document.querySelector("#diagnosticsPanel"),
-  wikiCompileBtn: document.querySelector("#wikiCompileBtn"),
-  wikiTodoBtn: document.querySelector("#wikiTodoBtn"),
   wikiHint: document.querySelector("#wikiHint"),
   wikiResult: document.querySelector("#wikiResult"),
   wikiTodoList: document.querySelector("#wikiTodoList"),
@@ -118,6 +111,18 @@ const elements = {
   disposeAction: document.querySelector("#disposeAction"),
   disposeReason: document.querySelector("#disposeReason"),
   disposeSync: document.querySelector("#disposeSync"),
+  dailyInboxDialog: document.querySelector("#dailyInboxDialog"),
+  dailyInboxTitle: document.querySelector("#dailyInboxTitle"),
+  dailyInboxSummary: document.querySelector("#dailyInboxSummary"),
+  dailyInboxList: document.querySelector("#dailyInboxList"),
+  dailyInboxSelectAllBtn: document.querySelector("#dailyInboxSelectAllBtn"),
+  dailyInboxImportBtn: document.querySelector("#dailyInboxImportBtn"),
+  dailyInboxActions: document.querySelector("#dailyInboxActions"),
+  dailyInboxConfirm: document.querySelector("#dailyInboxConfirm"),
+  dailyInboxConfirmMsg: document.querySelector("#dailyInboxConfirmMsg"),
+  dailyInboxConfirmCancelBtn: document.querySelector("#dailyInboxConfirmCancelBtn"),
+  dailyInboxConfirmOkBtn: document.querySelector("#dailyInboxConfirmOkBtn"),
+  scheduleDaySidebar: document.querySelector("#scheduleDaySidebar"),
   larkAuthDialog: document.querySelector("#larkAuthDialog"),
   larkAuthMessage: document.querySelector("#larkAuthMessage"),
   larkAuthCode: document.querySelector("#larkAuthCode"),
@@ -127,6 +132,7 @@ const elements = {
   copyLarkAuthCodeBtn: document.querySelector("#copyLarkAuthCodeBtn"),
   topicCardTemplate: document.querySelector("#topicCardTemplate"),
   appToast: document.querySelector("#appToast"),
+  themeToggleBtn: document.querySelector("#themeToggleBtn"),
 };
 
 boot();
@@ -134,8 +140,29 @@ boot();
 async function boot() {
   elements.backlogPageSize.value = String(state.backlogPageSize);
   elements.inboxPageSize.value = String(state.inboxPageSize);
+  initTheme();
   bindEvents();
   await loadTopics();
+}
+
+function initTheme() {
+  const saved = window.localStorage.getItem("afu-theme");
+  const isDark = saved === "dark";
+  document.documentElement.dataset.theme = isDark ? "dark" : "light";
+  updateThemeToggle(isDark);
+}
+
+function toggleTheme() {
+  const isDark = document.documentElement.dataset.theme !== "dark";
+  document.documentElement.dataset.theme = isDark ? "dark" : "light";
+  window.localStorage.setItem("afu-theme", isDark ? "dark" : "light");
+  updateThemeToggle(isDark);
+}
+
+function updateThemeToggle(isDark) {
+  if (elements.themeToggleBtn) {
+    elements.themeToggleBtn.textContent = isDark ? "◑ 浅色" : "◑ 深色";
+  }
 }
 
 function bindEvents() {
@@ -191,12 +218,14 @@ function bindEvents() {
 
   elements.inboxSelectPageBtn?.addEventListener("click", () => toggleSelectCurrentInboxPage());
   elements.inboxImportBatchBtn?.addEventListener("click", () => importSelectedInboxCandidates());
-  elements.inboxWikiBatchBtn?.addEventListener("click", () => captureWikiBatchFromInbox());
+  elements.dailyInboxSelectAllBtn?.addEventListener("click", () => toggleDailyInboxSelection());
+  elements.dailyInboxImportBtn?.addEventListener("click", () => importDailyInboxSelection());
+  elements.dailyInboxConfirmCancelBtn?.addEventListener("click", () => cancelDailyInboxConfirm());
+  elements.dailyInboxConfirmOkBtn?.addEventListener("click", () => confirmDailyInboxImport());
 
   elements.refreshBtn.addEventListener("click", () => loadTopics());
+  elements.themeToggleBtn?.addEventListener("click", () => toggleTheme());
   elements.diagnosticsBtn?.addEventListener("click", () => toggleDiagnostics());
-  elements.wikiCompileBtn?.addEventListener("click", () => compileWikiPacket());
-  elements.wikiTodoBtn?.addEventListener("click", () => generateWikiTodos());
   elements.plannerSettingsForm?.addEventListener("submit", submitPlannerSettings);
   elements.prevWeekBtn.addEventListener("click", () => {
     state.weekOffset -= 1;
@@ -219,8 +248,9 @@ function bindEvents() {
   });
 
   elements.scheduleForm.addEventListener("submit", submitSchedule);
-  elements.scheduleStart.addEventListener("input", clearActiveScheduleSlot);
-  elements.scheduleEnd.addEventListener("input", clearActiveScheduleSlot);
+  elements.scheduleStart.addEventListener("input", () => { clearActiveScheduleSlot(); renderScheduleDaySidebar(); });
+  elements.scheduleEnd.addEventListener("input", () => { clearActiveScheduleSlot(); renderScheduleDaySidebar(); });
+  elements.scheduleDate?.addEventListener("input", () => renderScheduleDaySidebar());
   elements.scheduleCalendarProvider.addEventListener("change", () => {
     elements.scheduleCalendarHint.textContent = getCalendarHint(
       elements.scheduleCalendarProvider.value,
@@ -260,6 +290,7 @@ async function loadTopics() {
     }
     pruneSelectedInboxPaths();
     render();
+    maybeOpenDailyInboxDialog();
   } catch (error) {
     alert(error.message);
   } finally {
@@ -273,7 +304,6 @@ function render() {
   renderWorkspaceView();
   renderBacklog();
   renderInboxCandidates();
-  renderWikiTodos();
   renderCalendar();
   renderToast();
 }
@@ -308,8 +338,9 @@ function renderHero() {
   elements.weekLabel.textContent = `${weekDays[0].displayShort} - ${weekDays[6].displayShort}`;
   elements.workspaceKind.textContent = getWorkspaceKind(state.settings);
   if (elements.workspaceConfigPath) {
-    elements.workspaceConfigPath.textContent = state.configPath || "配置文件未知";
-    elements.workspaceConfigPath.title = state.configPath || "";
+    const vaultDisplay = state.settings?.vaultRoot || state.configPath || "未配置";
+    elements.workspaceConfigPath.textContent = vaultDisplay;
+    elements.workspaceConfigPath.title = vaultDisplay;
   }
 
   const provider = state.settings?.calendarProvider || "none";
@@ -367,9 +398,6 @@ function renderPlannerSettings() {
   elements.plannerArchiveDir.value = state.settings.archiveDir || '';
   elements.plannerCalendarProvider.value = state.settings.calendarProvider || 'none';
   elements.plannerMacosCalendarName.value = state.settings.macosCalendarName || '';
-  elements.plannerWikiMode.value = state.settings.wikiMode || 'off';
-  elements.plannerWikiDir.value = state.settings.wikiDir || '30_研究/内容Wiki';
-  elements.plannerDailyCapacity.value = String(getDailyCapacity());
   elements.plannerSettingsHint.textContent = getSettingsHint(state.settings);
   renderLarkSetupPanel();
 }
@@ -440,17 +468,17 @@ function renderInboxCandidates() {
   elements.inboxWindowInfo.textContent = candidates.length
     ? `当前显示 ${startIndex + 1}-${startIndex + visibleCandidates.length} / ${candidates.length}`
     : '当前显示 0 / 0';
-  elements.inboxBatchInfo.textContent = `已选 ${selectedCount} 条 · 候选 ${summary.inboxCandidateFiles ?? candidates.length}/${summary.inboxMarkdownFiles ?? 0} · 已转卡 ${summary.inboxSkippedAlreadyImported ?? 0} · 已处理 ${summary.inboxSkippedProcessed ?? 0} · 过短 ${summary.inboxSkippedShort ?? 0}`;
+  elements.inboxBatchInfo.textContent = `已选 ${selectedCount} 条 · 候选 ${summary.inboxCandidateFiles ?? candidates.length}/${summary.inboxMarkdownFiles ?? 0} · 已转卡 ${summary.inboxSkippedAlreadyImported ?? 0} · 已处理 ${summary.inboxSkippedProcessed ?? 0} · 低信息量 ${summary.inboxLowInformation ?? summary.inboxSkippedShort ?? 0}`;
   elements.inboxSelectPageBtn.textContent = visibleCandidates.length && selectedOnPage === visibleCandidates.length ? '取消本页' : '本页全选';
   elements.inboxSelectPageBtn.disabled = visibleCandidates.length === 0;
   elements.inboxImportBatchBtn.disabled = selectedCount === 0;
-  elements.inboxWikiBatchBtn.disabled = candidates.length === 0;
+  if (elements.inboxWikiBatchBtn) elements.inboxWikiBatchBtn.disabled = candidates.length === 0;
 
   if (!candidates.length) {
     elements.inboxCandidateList.innerHTML = `
       <div class="empty-state inbox-empty">
         <strong>没有新的可转候选</strong>
-        <span>候选 ${summary.inboxCandidateFiles ?? 0} · 已转卡 ${summary.inboxSkippedAlreadyImported ?? 0} · 已处理 ${summary.inboxSkippedProcessed ?? 0} · 正文过短 ${summary.inboxSkippedShort ?? 0} · 系统文件 ${summary.inboxSkippedSystem ?? 0}</span>
+        <span>候选 ${summary.inboxCandidateFiles ?? 0} · 已转卡 ${summary.inboxSkippedAlreadyImported ?? 0} · 已处理 ${summary.inboxSkippedProcessed ?? 0} · 低信息量 ${summary.inboxLowInformation ?? summary.inboxSkippedShort ?? 0} · 系统文件 ${summary.inboxSkippedSystem ?? 0}</span>
         <span>如果 Obsidian 里还有很多素材，请先确认当前工作区是不是你的真实 Vault。</span>
       </div>`;
     return;
@@ -461,58 +489,129 @@ function renderInboxCandidates() {
   }
 }
 
-function renderWikiTodos() {
-  elements.wikiTodoList.innerHTML = "";
-  if (!state.wikiTodos.length) {
-    return;
+function maybeOpenDailyInboxDialog() {
+  if (!elements.dailyInboxDialog || state.dailyInboxDialogShown || !shouldOpenDailyInboxReminder()) return;
+  state.dailyInboxDialogShown = true;
+  state.dailyInboxDate = getInboxReminderDate();
+  const candidates = getDailyInboxCandidates();
+
+  for (const candidate of candidates) {
+    state.selectedInboxPaths.add(candidate.sourcePath);
   }
-  const totalPages = Math.max(1, Math.ceil(state.wikiTodos.length / state.wikiTodoPageSize));
-  const currentPage = Math.min(state.wikiTodoPage, totalPages);
-  const startIndex = (currentPage - 1) * state.wikiTodoPageSize;
-  const visibleTodos = state.wikiTodos.slice(startIndex, startIndex + state.wikiTodoPageSize);
-  state.wikiTodoPage = currentPage;
 
-  const pager = document.createElement("div");
-  pager.className = "wiki-result";
-  pager.innerHTML = `
-    <span>行动卡第 ${currentPage} / ${totalPages} 页 · 当前 ${startIndex + 1}-${startIndex + visibleTodos.length} / ${state.wikiTodos.length}</span>
-    <div class="inline-pager">
-      <button class="ghost-btn" data-action="wiki-prev" type="button">上一页</button>
-      <button class="ghost-btn" data-action="wiki-next" type="button">下一页</button>
-    </div>`;
-  pager.querySelector('[data-action="wiki-prev"]').disabled = currentPage === 1;
-  pager.querySelector('[data-action="wiki-next"]').disabled = currentPage === totalPages;
-  pager.querySelector('[data-action="wiki-prev"]').addEventListener('click', () => {
-    state.wikiTodoPage = Math.max(1, state.wikiTodoPage - 1);
-    renderWikiTodos();
-  });
-  pager.querySelector('[data-action="wiki-next"]').addEventListener('click', () => {
-    state.wikiTodoPage += 1;
-    renderWikiTodos();
-  });
-  elements.wikiTodoList.append(pager);
-
-  for (const todo of visibleTodos) {
-    const card = document.createElement("article");
-    card.className = "wiki-todo-card";
-    card.innerHTML = `
-      <div class="topic-top">
-        <span class="topic-priority">LLM Todo</span>
-        <span class="topic-stage">${todo.confidence}</span>
-      </div>
-      <h3>${escapeHtml(todo.title)}</h3>
-      <p>${escapeHtml(todo.reason)}</p>
-      <div class="topic-tags">${(todo.targetForms || []).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</div>
-      <div class="topic-actions">
-        <button class="mini-btn" data-action="accept" type="button">生成选题卡</button>
-        <button class="mini-btn" data-action="reject" type="button">拒绝</button>
-      </div>
-    `;
-    card.querySelector('[data-action="accept"]').addEventListener("click", () => acceptWikiTodo(todo));
-    card.querySelector('[data-action="reject"]').addEventListener("click", () => rejectWikiTodo(todo));
-    elements.wikiTodoList.append(card);
+  renderInboxCandidates();
+  renderDailyInboxDialog();
+  if (!elements.dailyInboxDialog.open) {
+    elements.dailyInboxDialog.showModal();
   }
 }
+
+function renderDailyInboxDialog() {
+  if (!elements.dailyInboxDialog) return;
+  const date = state.dailyInboxDate || getInboxReminderDate();
+  const candidates = getDailyInboxCandidates(date);
+  const selected = getSelectedDailyInboxCandidates(date);
+  const allSelected = candidates.length > 0 && selected.length === candidates.length;
+
+  elements.dailyInboxTitle.textContent = `处理 ${date} 收件箱`;
+  elements.dailyInboxSummary.textContent = candidates.length
+    ? `发现 ${candidates.length} 条当天候选，已选 ${selected.length} 条。勾选后批量转卡，重复内容会自动合并。`
+    : `没有在 ${getInboxFolderPrefix(date)} 下发现新的可转候选。可能已经转卡、标记 processed，或当前 Vault 配置不对。`;
+  elements.dailyInboxSelectAllBtn.textContent = allSelected ? "取消全选" : "全选当天";
+  elements.dailyInboxSelectAllBtn.disabled = candidates.length === 0;
+  elements.dailyInboxImportBtn.disabled = selected.length === 0;
+  elements.dailyInboxList.innerHTML = "";
+
+  if (!candidates.length) {
+    elements.dailyInboxList.innerHTML = `<div class="empty-state">当天没有可处理候选。</div>`;
+    return;
+  }
+
+  for (const candidate of candidates) {
+    elements.dailyInboxList.append(createDailyInboxItem(candidate));
+  }
+}
+
+function createDailyInboxItem(candidate) {
+  const item = document.createElement("label");
+  item.className = "daily-inbox-item";
+
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = state.selectedInboxPaths.has(candidate.sourcePath);
+  checkbox.addEventListener("change", () => {
+    if (checkbox.checked) {
+      state.selectedInboxPaths.add(candidate.sourcePath);
+    } else {
+      state.selectedInboxPaths.delete(candidate.sourcePath);
+    }
+    renderInboxCandidates();
+    renderDailyInboxDialog();
+  });
+
+  const body = document.createElement("span");
+  body.className = "daily-inbox-item-body";
+  const title = document.createElement("strong");
+  title.textContent = candidate.title;
+  const meta = document.createElement("small");
+  meta.textContent = candidate.sourcePath;
+  const excerpt = document.createElement("span");
+  excerpt.textContent = candidate.excerpt || "暂无摘要";
+  body.append(title, meta, excerpt);
+  item.append(checkbox, body);
+  return item;
+}
+
+function toggleDailyInboxSelection() {
+  const candidates = getDailyInboxCandidates();
+  const allSelected = candidates.length > 0 && candidates.every((candidate) => state.selectedInboxPaths.has(candidate.sourcePath));
+  for (const candidate of candidates) {
+    if (allSelected) {
+      state.selectedInboxPaths.delete(candidate.sourcePath);
+    } else {
+      state.selectedInboxPaths.add(candidate.sourcePath);
+    }
+  }
+  renderInboxCandidates();
+  renderDailyInboxDialog();
+}
+
+function importDailyInboxSelection() {
+  const sourcePaths = getSelectedDailyInboxCandidates().map((c) => c.sourcePath);
+  if (!sourcePaths.length) return;
+  showDailyInboxConfirm(sourcePaths);
+}
+
+function showDailyInboxConfirm(sourcePaths) {
+  state.dailyInboxPendingPaths = sourcePaths;
+  const preview = sourcePaths.slice(0, 3).map((p) => {
+    const c = (state.inboxCandidates || []).find((x) => x.sourcePath === p);
+    return c ? c.title : p.split("/").pop().replace(/\.md$/, "");
+  });
+  const suffix = sourcePaths.length > 3 ? `…等共 ${sourcePaths.length} 条` : `共 ${sourcePaths.length} 条`;
+  elements.dailyInboxConfirmMsg.textContent = `即将转卡：${preview.join("、")}${sourcePaths.length > 3 ? "、" : "，"}${suffix}`;
+  elements.dailyInboxConfirm.hidden = false;
+  elements.dailyInboxList.hidden = true;
+  elements.dailyInboxSummary.hidden = true;
+  elements.dailyInboxActions.hidden = true;
+}
+
+function cancelDailyInboxConfirm() {
+  state.dailyInboxPendingPaths = null;
+  elements.dailyInboxConfirm.hidden = true;
+  elements.dailyInboxList.hidden = false;
+  elements.dailyInboxSummary.hidden = false;
+  elements.dailyInboxActions.hidden = false;
+}
+
+async function confirmDailyInboxImport() {
+  const sourcePaths = state.dailyInboxPendingPaths;
+  if (!sourcePaths?.length) return;
+  cancelDailyInboxConfirm();
+  elements.dailyInboxDialog?.close();
+  await importSelectedInboxCandidates(sourcePaths, true);
+}
+
 
 function renderCalendar() {
   const days = getCurrentWeekDays();
@@ -554,7 +653,7 @@ function renderCalendar() {
       list.innerHTML = `<div class="empty-state">拖一张选题到这里，选择快捷时段后排进 ${day.label}。</div>`;
     } else {
       for (const topic of scheduled.sort((a, b) => (a.scheduledStart || "").localeCompare(b.scheduledStart || ""))) {
-        list.append(createTopicCard(topic, { showUnschedule: true, compact: true }));
+        list.append(createTopicCard(topic, { showUnschedule: true, calendar: true }));
       }
     }
 
@@ -575,8 +674,8 @@ function createTopicCard(topic, options = {}) {
 
   card.dataset.path = topic.path;
   card.dataset.stage = topic.stage;
-  card.dataset.density = options.compact ? "compact" : "focus";
-  if (!options.compact && state.recentTopicPaths.includes(topic.path)) {
+  card.dataset.density = options.calendar ? "mini" : options.compact ? "compact" : "focus";
+  if (!options.compact && !options.calendar && state.recentTopicPaths.includes(topic.path)) {
     card.classList.add("is-recent");
   }
   card.draggable = true;
@@ -589,7 +688,14 @@ function createTopicCard(topic, options = {}) {
   date.textContent = topic.scheduledDate
     ? `${topic.scheduledDate}${topic.scheduledStart ? ` · ${topic.scheduledStart}-${topic.scheduledEnd}` : ""}`
     : "尚未排期";
-  sync.textContent = topic.calendarSyncStatus || "未同步";
+  const hasExternalCal = state.settings?.calendarProvider && state.settings.calendarProvider !== "none";
+  const isScheduled = !!topic.scheduledDate;
+  if (hasExternalCal && isScheduled) {
+    sync.textContent = topic.calendarSyncStatus || "未同步";
+  } else {
+    sync.textContent = "";
+    sync.hidden = true;
+  }
 
   for (const item of [...(topic.targetForms || []), ...topic.platforms, ...topic.tags].slice(0, options.compact ? 2 : 3)) {
     const pill = document.createElement("span");
@@ -611,8 +717,19 @@ function createTopicCard(topic, options = {}) {
   const unscheduleBtn = fragment.querySelector('[data-action="unschedule"]');
   const disposeBtn = fragment.querySelector('[data-action="dispose"]');
 
+  if (topic.scheduledDate) {
+    scheduleBtn.textContent = "重新排期";
+  }
+
   scheduleBtn.addEventListener("click", () => openScheduleDialog(topic, topic.scheduledDate || getCurrentWeekDays()[0].iso));
   disposeBtn.addEventListener("click", () => openDisposeDialog(topic));
+
+  if (options.calendar) {
+    card.addEventListener("click", (e) => {
+      if (e.target.closest("button")) return;
+      card.classList.toggle("is-expanded");
+    });
+  }
 
   if (options.showUnschedule) {
     unscheduleBtn.addEventListener("click", () => handleUnschedule(topic));
@@ -686,7 +803,26 @@ function createInboxCandidateCard(candidate) {
   importBtn.className = 'mini-btn';
   importBtn.type = 'button';
   importBtn.textContent = '让阿福转卡';
-  importBtn.addEventListener('click', () => importInboxCandidate(candidate));
+  importBtn.addEventListener('click', () => {
+    const existing = actions.querySelector('.inline-confirm');
+    if (existing) { existing.remove(); return; }
+    const bar = document.createElement('div');
+    bar.className = 'inline-confirm';
+    const msg = document.createElement('span');
+    msg.textContent = candidate.confidence === 'low' ? '低置信度，确认转卡？' : '确认转卡？';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'mini-btn';
+    cancelBtn.textContent = '取消';
+    cancelBtn.addEventListener('click', () => bar.remove());
+    const okBtn = document.createElement('button');
+    okBtn.type = 'button';
+    okBtn.className = 'mini-btn accent-btn';
+    okBtn.textContent = '确认';
+    okBtn.addEventListener('click', () => { bar.remove(); importInboxCandidate(candidate); });
+    bar.append(msg, cancelBtn, okBtn);
+    actions.append(bar);
+  });
   actions.append(importBtn);
   card.append(actions);
 
@@ -730,6 +866,7 @@ function openScheduleDialog(topic, dateIso) {
     state.settings,
   );
   elements.scheduleDialog.showModal();
+  renderScheduleDaySidebar();
 }
 
 function renderScheduleSlots(topic = {}) {
@@ -780,6 +917,9 @@ async function submitSchedule(event) {
 
   await postAndReload("/api/topics/schedule", payload);
   elements.scheduleDialog.close();
+  if (state.scheduleQueue.length) {
+    advanceScheduleQueue();
+  }
 }
 
 function openDisposeDialog(topic) {
@@ -1038,17 +1178,6 @@ async function copyTextFromButton(button, text) {
 }
 
 async function importInboxCandidate(candidate) {
-  const topicDir = state.settings?.topicDir || '15_自媒体/选题库';
-  const baseMessage = `要让阿福把「${candidate.title}」转成选题卡吗？系统会在 ${topicDir} 里创建一张可继续补写的卡片。`;
-  const riskMessage = (candidate.reasons || []).length
-    ? `\n\n这条素材目前判断为${formatCandidateConfidence(candidate.confidence)}，原因：${candidate.reasons.join('；')}。`
-    : '';
-  const finalMessage = candidate.confidence === 'low'
-    ? `${baseMessage}${riskMessage}\n\n建议你转卡后先补“选题判断 / 可拍主张”，确认没跑偏再排期。`
-    : `${baseMessage}${riskMessage}`;
-  const confirmed = window.confirm(finalMessage);
-  if (!confirmed) return;
-
   setBusy(true);
   try {
     const response = await fetch('/api/inbox/import', {
@@ -1061,17 +1190,19 @@ async function importInboxCandidate(candidate) {
       throw new Error(data.error || '转卡失败');
     }
     const importedTitle = stripTopicPrefix(data.topic?.title || candidate.title);
-    state.lastCreatedTopic = {
-      path: data.topic?.path || data.created || "",
-      title: importedTitle,
-    };
+    const topicPath = data.topic?.path || data.mergedInto || data.created || "";
+    state.lastCreatedTopic = { path: topicPath, title: importedTitle };
     rememberCreatedTopics([state.lastCreatedTopic]);
     clearBacklogFilters();
     state.selectedInboxPaths.delete(candidate.sourcePath);
     await loadTopics();
     state.workspaceView = "inbox";
     setWorkspaceView("inbox");
-    showTopicToast(`已转入题库：${importedTitle}`, state.lastCreatedTopic);
+    if (data.merged) {
+      showTopicToast(`已合并到「${stripTopicPrefix(data.mergedTitle)}」`, state.lastCreatedTopic);
+    }
+    state.scheduleQueue = [{ path: topicPath, title: importedTitle }];
+    advanceScheduleQueue();
   } catch (error) {
     alert(error.message);
   } finally {
@@ -1079,11 +1210,9 @@ async function importInboxCandidate(candidate) {
   }
 }
 
-async function importSelectedInboxCandidates() {
-  const sourcePaths = Array.from(state.selectedInboxPaths);
+async function importSelectedInboxCandidates(sourcePaths = Array.from(state.selectedInboxPaths), noConfirm = false) {
+  sourcePaths = Array.from(new Set(sourcePaths)).filter(Boolean);
   if (!sourcePaths.length) return;
-  const confirmed = window.confirm(`确认批量转卡 ${sourcePaths.length} 条素材吗？成功项会进入题库，当前页面继续停留在收件箱。`);
-  if (!confirmed) return;
 
   setBusy(true);
   try {
@@ -1120,12 +1249,66 @@ async function importSelectedInboxCandidates() {
     const message = failedCount
       ? `已转入题库 ${data.created.length} 条，失败 ${failedCount} 条。`
       : `已转入题库 ${data.created.length} 条。`;
-    showTopicToast(message, state.lastCreatedTopic);
+
+    if ((data.created || []).length) {
+      state.scheduleQueue = (data.created || []).map((item) => ({ path: item.path, title: item.title }));
+      advanceScheduleQueue();
+    } else {
+      showTopicToast(message, state.lastCreatedTopic);
+    }
   } catch (error) {
     alert(error.message);
   } finally {
     setBusy(false);
   }
+}
+
+function advanceScheduleQueue() {
+  const next = state.scheduleQueue.shift();
+  if (!next) {
+    showToast(`排期队列已完成`);
+    return;
+  }
+  const topic = (state.topics || []).find((t) => t.path === next.path);
+  if (!topic) {
+    advanceScheduleQueue();
+    return;
+  }
+  const defaultDate = state.dailyInboxDate || formatDate(new Date());
+  openScheduleDialog(topic, topic.scheduledDate || defaultDate);
+}
+
+function renderScheduleDaySidebar() {
+  if (!elements.scheduleDaySidebar) return;
+  const date = elements.scheduleDate?.value;
+  if (!date) {
+    elements.scheduleDaySidebar.innerHTML = "";
+    return;
+  }
+  const sameDay = (state.topics || []).filter((t) => t.scheduledDate === date && t.path !== state.scheduleTarget?.path);
+  if (!sameDay.length) {
+    elements.scheduleDaySidebar.innerHTML = `<p class="schedule-day-sidebar-title">${date} 当天还没有安排</p>`;
+    return;
+  }
+  const newStart = elements.scheduleStart?.value;
+  const newEnd = elements.scheduleEnd?.value;
+
+  const items = sameDay.map((t) => {
+    const hasConflict = newStart && newEnd && t.scheduledStart && t.scheduledEnd
+      && newStart < t.scheduledEnd && newEnd > t.scheduledStart;
+    const item = document.createElement("div");
+    item.className = `schedule-day-item${hasConflict ? " conflict" : ""}`;
+    item.innerHTML = `<strong>${stripTopicPrefix(t.title)}</strong><span>${t.scheduledStart || ""}${t.scheduledEnd ? "–" + t.scheduledEnd : ""}</span>`;
+    return item;
+  });
+
+  const hasAnyConflict = items.some((el) => el.classList.contains("conflict"));
+  elements.scheduleDaySidebar.innerHTML = "";
+  elements.scheduleDaySidebar.append(
+    Object.assign(document.createElement("p"), { className: "schedule-day-sidebar-title", textContent: `${date} 已有 ${sameDay.length} 条安排` }),
+    ...items,
+    ...(hasAnyConflict ? [Object.assign(document.createElement("p"), { className: "schedule-conflict-warn", textContent: "时间段与已有排期重叠，请注意调整。" })] : []),
+  );
 }
 
 async function toggleDiagnostics() {
@@ -1179,117 +1362,10 @@ function renderDiagnostics() {
       `).join('')}
       <div class="diagnostics-row ok">
         <strong>收件箱过滤</strong>
-        <span>候选 ${summary.inboxCandidateFiles ?? 0} · 已转卡 ${summary.inboxSkippedAlreadyImported ?? 0} · 已处理 ${summary.inboxSkippedProcessed ?? 0} · 正文过短 ${summary.inboxSkippedShort ?? 0} · 系统文件 ${summary.inboxSkippedSystem ?? 0}</span>
+        <span>候选 ${summary.inboxCandidateFiles ?? 0} · 已转卡 ${summary.inboxSkippedAlreadyImported ?? 0} · 已处理 ${summary.inboxSkippedProcessed ?? 0} · 低信息量 ${summary.inboxLowInformation ?? summary.inboxSkippedShort ?? 0} · 系统文件 ${summary.inboxSkippedSystem ?? 0}</span>
       </div>
     </div>
   `;
-}
-
-async function compileWikiPacket() {
-  const sourcePaths = getWikiBatchSourcePaths();
-  if (!sourcePaths.length) {
-    elements.wikiResult.textContent = "当前没有可编译素材。回到收件箱选择素材，或先重置 demo。";
-    return;
-  }
-  setBusy(true);
-  try {
-    const response = await fetch('/api/wiki/compile', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sourcePaths }),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || '编译失败');
-    }
-    elements.wikiResult.innerHTML = `已生成 Wiki 编译包：<strong>${escapeHtml(data.packet.path)}</strong><br />本次批次 ${sourcePaths.length} 条 · 写入素材 ${data.packet.sourceCount}`;
-  } catch (error) {
-    elements.wikiResult.textContent = error.message;
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function generateWikiTodos() {
-  const sourcePaths = getWikiBatchSourcePaths();
-  if (!sourcePaths.length) {
-    elements.wikiResult.textContent = "当前没有 Wiki 批次。回到收件箱选择素材，再生成行动卡。";
-    return;
-  }
-  setBusy(true);
-  try {
-    const response = await fetch('/api/wiki/todos/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sourcePaths }),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || '生成行动卡失败');
-    }
-    state.wikiTodos = data.todos || [];
-    state.wikiTodoPage = 1;
-    elements.wikiResult.innerHTML = `当前 Wiki 批次 ${data.sourceCount ?? sourcePaths.length} 条素材 · 已生成 ${state.wikiTodos.length} 张行动卡：<strong>${escapeHtml(data.storePath || '')}</strong>`;
-    renderWikiTodos();
-  } catch (error) {
-    elements.wikiResult.textContent = error.message;
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function acceptWikiTodo(todo) {
-  setBusy(true);
-  try {
-    const response = await fetch('/api/wiki/todos/accept', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ todo }),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || '生成选题卡失败');
-    }
-    state.wikiTodos = state.wikiTodos.filter((item) => item.id !== todo.id);
-    state.lastCreatedTopic = {
-      path: data.topic?.path || data.created || "",
-      title: stripTopicPrefix(data.topic?.title || todo.title),
-    };
-    rememberCreatedTopics([state.lastCreatedTopic]);
-    clearBacklogFilters();
-    elements.wikiResult.textContent = `已进入题库：${state.lastCreatedTopic.title}`;
-    await loadTopics();
-    state.workspaceView = "wiki";
-    setWorkspaceView("wiki");
-    showTopicToast(`已进入题库：${state.lastCreatedTopic.title}`, state.lastCreatedTopic);
-  } catch (error) {
-    alert(error.message);
-  } finally {
-    setBusy(false);
-  }
-}
-
-async function rejectWikiTodo(todo) {
-  const confirmed = window.confirm(`确认拒绝行动卡「${todo.title}」？`);
-  if (!confirmed) return;
-  setBusy(true);
-  try {
-    const response = await fetch('/api/wiki/todos/reject', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ todo }),
-    });
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || '拒绝失败');
-    }
-    state.wikiTodos = state.wikiTodos.filter((item) => item.id !== todo.id);
-    renderWikiTodos();
-  } catch (error) {
-    alert(error.message);
-  } finally {
-    setBusy(false);
-  }
 }
 
 function getCurrentInboxPageCandidates() {
@@ -1298,33 +1374,6 @@ function getCurrentInboxPageCandidates() {
   const currentPage = Math.min(state.inboxPage, totalPages);
   const startIndex = candidates.length === 0 ? 0 : (currentPage - 1) * state.inboxPageSize;
   return candidates.slice(startIndex, startIndex + state.inboxPageSize);
-}
-
-function getWikiBatchSourcePaths() {
-  if (state.wikiBatchSourcePaths.length) return [...state.wikiBatchSourcePaths];
-  const selected = Array.from(state.selectedInboxPaths);
-  if (selected.length) return selected;
-  return getCurrentInboxPageCandidates().map((candidate) => candidate.sourcePath);
-}
-
-function captureWikiBatchFromInbox() {
-  const selected = Array.from(state.selectedInboxPaths);
-  const candidates = selected.length
-    ? (state.inboxCandidates || []).filter((candidate) => selected.includes(candidate.sourcePath))
-    : getCurrentInboxPageCandidates();
-
-  if (!candidates.length) {
-    showToast("当前收件箱没有可加入 Wiki 的素材。可以先运行 demo:reset 还原 3 条样例。");
-    return;
-  }
-
-  state.wikiBatchSourcePaths = candidates.map((candidate) => candidate.sourcePath);
-  state.wikiBatchTitles = candidates.map((candidate) => candidate.title);
-  state.workspaceView = "wiki";
-  setWorkspaceView("wiki");
-  elements.wikiResult.innerHTML = `当前 Wiki 批次已锁定 <strong>${state.wikiBatchSourcePaths.length}</strong> 条素材。下一步点击“编译收件箱批次”，再点“生成行动卡”。`;
-  elements.wikiHint.textContent = `当前批次：${state.wikiBatchTitles.slice(0, 3).join(" / ")}`;
-  showToast(`已把 ${state.wikiBatchSourcePaths.length} 条素材加入 Wiki 批次。`);
 }
 
 function toggleSelectCurrentInboxPage() {
@@ -1430,11 +1479,11 @@ async function submitPlannerSettings(event) {
     archiveDir: elements.plannerArchiveDir.value.trim(),
     calendarProvider: elements.plannerCalendarProvider.value,
     macosCalendarName: elements.plannerMacosCalendarName.value.trim(),
-    wikiMode: elements.plannerWikiMode.value,
-    wikiDir: elements.plannerWikiDir.value.trim(),
-    wikiIndexPath: `${elements.plannerWikiDir.value.trim() || '30_研究/内容Wiki'}/index.md`,
-    wikiLogPath: `${elements.plannerWikiDir.value.trim() || '30_研究/内容Wiki'}/log.md`,
-    dailyCapacity: Number(elements.plannerDailyCapacity.value) || RECOMMENDED_DAILY_CAPACITY,
+    wikiMode: state.settings?.wikiMode || 'agent',
+    wikiDir: state.settings?.wikiDir || '30_研究/内容Wiki',
+    wikiIndexPath: `${state.settings?.wikiDir || '30_研究/内容Wiki'}/index.md`,
+    wikiLogPath: `${state.settings?.wikiDir || '30_研究/内容Wiki'}/log.md`,
+    dailyCapacity: state.settings?.dailyCapacity || RECOMMENDED_DAILY_CAPACITY,
     scheduleTimeSlots: getScheduleTimeSlots(),
   };
 
@@ -1466,6 +1515,40 @@ function formatCandidateConfidence(level = 'medium') {
   if (level === 'high') return '高';
   if (level === 'low') return '低';
   return '中';
+}
+
+function shouldOpenDailyInboxReminder() {
+  const params = new URLSearchParams(window.location.search);
+  return params.has("inboxDate") || ["1", "true"].includes(String(params.get("dailyInbox") || "").toLowerCase());
+}
+
+function getInboxReminderDate() {
+  const params = new URLSearchParams(window.location.search);
+  const explicitDate = String(params.get("inboxDate") || params.get("date") || "").trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(explicitDate) ? explicitDate : formatDate(new Date());
+}
+
+function normalizeSourcePath(value) {
+  return String(value || "").replace(/\\/g, "/").replace(/^\/+/g, "");
+}
+
+function normalizeInboxDir(value) {
+  return normalizeSourcePath(value || "00_收件箱").replace(/\/+$/g, "");
+}
+
+function getInboxFolderPrefix(date = state.dailyInboxDate || getInboxReminderDate()) {
+  return `${normalizeInboxDir(state.settings?.inboxDir)}/${date}/`;
+}
+
+function getDailyInboxCandidates(date = state.dailyInboxDate || getInboxReminderDate()) {
+  const prefix = getInboxFolderPrefix(date);
+  return (state.inboxCandidates || []).filter((candidate) =>
+    normalizeSourcePath(candidate.sourcePath).startsWith(prefix),
+  );
+}
+
+function getSelectedDailyInboxCandidates(date = state.dailyInboxDate || getInboxReminderDate()) {
+  return getDailyInboxCandidates(date).filter((candidate) => state.selectedInboxPaths.has(candidate.sourcePath));
 }
 
 function escapeHtml(value) {

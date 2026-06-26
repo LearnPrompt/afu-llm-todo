@@ -36,6 +36,16 @@ Then ask your agent:
 Use Afu to process my Obsidian inbox. Compile the batch into a wiki, then generate this week's todo cards.
 ```
 
+## Daily Inbox Reminder
+
+Afu can also run as a lightweight daily inbox reminder.
+
+```text
+Remind me every day at 23:30 to process my Obsidian inbox. First check the `00_收件箱/YYYY-MM-DD/` date folder, then check today's modified auto-ingest and candidate-topic files. Do not rely only on file modification time, and do not describe historical leftovers as today's new inbox. If there is nothing new today, say so clearly. Then list historical backlog separately, pick the 3-5 candidates most worth handling, and say whether each one should stay in the inbox, be compiled into the wiki, become a todo card, or wait for my decision. Do not delete, move, or rewrite original notes unless I confirm.
+```
+
+The reminder should not be a vague nudge. It should surface the next few decisions so the user can start from judgment, not from rummaging through raw notes.
+
 ## Run The Local Demo
 
 The demo uses a sample vault. Your real notes stay where they are.

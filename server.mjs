@@ -353,6 +353,7 @@ async function analyzeInboxCandidates(existingTopics = []) {
     inboxSkippedProcessed: 0,
     inboxSkippedAlreadyImported: 0,
     inboxSkippedShort: 0,
+    inboxLowInformation: 0,
     inboxSkippedSystem: 0,
   };
 
@@ -374,8 +375,7 @@ async function analyzeInboxCandidates(existingTopics = []) {
       continue;
     }
     if (candidate.excerpt.length < 16) {
-      summary.inboxSkippedShort += 1;
-      continue;
+      summary.inboxLowInformation += 1;
     }
     if (takenPaths.has(candidate.sourcePath) || (candidate.sourceUrl && takenUrls.has(candidate.sourceUrl))) {
       summary.inboxSkippedAlreadyImported += 1;
@@ -394,6 +394,43 @@ function isSystemInboxFile(relPath) {
   return basename === "README.md" || basename.startsWith(".");
 }
 
+function titleKeywords(title) {
+  const stops = new Set(['的', '了', '是', '在', '有', '和', '与', '从', '为', '把', '被', '对', '让', '能', '也', '都', '就', '到', '中', '上', '下', '来', '去', '会', '要', '这', '那', '个', '着', '过', '一', '不', '我', '你', '他', '她']);
+  return new Set(
+    title
+      .replace(/[，。！？、：；「」【】《》()（）[\]\/\\,.!?;:\-_\s]/g, ' ')
+      .split(/\s+/)
+      .flatMap(t => /[一-鿿]/.test(t) ? [...t] : [t])
+      .filter(t => t.length > 0 && !stops.has(t))
+      .map(t => t.toLowerCase())
+  );
+}
+
+function keywordOverlap(a, b) {
+  const ka = titleKeywords(a);
+  const kb = titleKeywords(b);
+  if (!ka.size || !kb.size) return 0;
+  let shared = 0;
+  for (const k of ka) if (kb.has(k)) shared++;
+  return shared / Math.min(ka.size, kb.size);
+}
+
+function buildAppendSection(candidate) {
+  const date = new Date().toISOString().slice(0, 10);
+  return [
+    '',
+    '---',
+    '',
+    `## 补充素材（${date}）`,
+    '',
+    `**来源：** ${candidate.sourceUrl || candidate.sourcePath}`,
+    `**作者：** ${candidate.author || '未知'}`,
+    '',
+    candidate.excerpt || '',
+    '',
+  ].join('\n');
+}
+
 async function importInboxCandidate(payload) {
   const { vaultRoot } = await getPlannerPaths();
   const sourcePath = optionalString(payload.sourcePath);
@@ -404,6 +441,27 @@ async function importInboxCandidate(payload) {
   const absolutePath = await resolveInboxPath(sourcePath);
   const raw = await fs.readFile(absolutePath, "utf8");
   const candidate = deriveInboxCandidate({ filePath: sourcePath, raw });
+
+  // Dedup: 标题关键词重叠 ≥50% 时合并到已有卡
+  const topics = await listTopics();
+  const duplicate = topics.find(t => keywordOverlap(candidate.title, t.title) >= 0.5);
+  if (duplicate) {
+    const absoluteTopicPath = path.join(vaultRoot, duplicate.path);
+    const existing = await fs.readFile(absoluteTopicPath, "utf8");
+    await fs.writeFile(absoluteTopicPath, existing + buildAppendSection(candidate), "utf8");
+    await appendPlannerLog("inbox-merge", candidate.title, {
+      source: candidate.sourcePath,
+      mergedInto: duplicate.path,
+    });
+    return {
+      ok: true,
+      merged: true,
+      mergedInto: duplicate.path,
+      mergedTitle: duplicate.title,
+      topic: await readTopic(absoluteTopicPath),
+    };
+  }
+
   const draft = buildTopicDraftFromInbox(candidate);
   const targetPath = await reserveTopicPath(draft.filename);
   await fs.writeFile(targetPath, draft.content, "utf8");
@@ -414,6 +472,7 @@ async function importInboxCandidate(payload) {
 
   return {
     ok: true,
+    merged: false,
     created: path.relative(vaultRoot, targetPath),
     topic: await readTopic(targetPath),
   };
@@ -895,8 +954,10 @@ function normalizeTopic(frontmatter, title, relPath) {
 }
 
 function deriveStage(frontmatter) {
-  if (optionalString(frontmatter.stage)) {
-    return frontmatter.stage;
+  const stage = optionalString(frontmatter.stage);
+  if (stage) {
+    // "去重中" 是旧版 Wiki 流程遗留状态，现在去重内置于转卡流程，回退为待排期
+    return stage === "去重中" ? "待排期" : stage;
   }
   if (optionalString(frontmatter.drop_reason)) {
     return "已归档";

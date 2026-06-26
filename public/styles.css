@@ -135,6 +135,7 @@ body {
 
 .hero,
 .toolbar,
+.config-section .planner-settings-details,
 .backlog-panel,
 .calendar-panel,
 .modal-card {
@@ -251,7 +252,7 @@ body {
 .hero-meta {
   margin-top: 18px;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   align-content: start;
 }
@@ -259,15 +260,16 @@ body {
 .hero-side {
   display: grid;
   gap: 16px;
-  align-content: start;
+  align-content: center;
+  justify-items: center;
 }
 
 .hero-mascot {
   width: 100%;
-  max-height: 360px;
+  max-height: 420px;
   border-radius: 20px;
   object-fit: contain;
-  object-position: center bottom;
+  object-position: center;
   display: block;
 }
 
@@ -304,6 +306,7 @@ body {
   cursor: pointer;
   user-select: none;
   list-style: none;
+  flex-wrap: wrap;
 }
 
 .settings-summary::-webkit-details-marker { display: none; }
@@ -335,6 +338,49 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  margin-left: auto;
+}
+
+.settings-summary-workspace {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-summary-workspace strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  flex-shrink: 0;
+}
+
+.settings-summary-workspace small {
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.config-section {
+  margin-top: 20px;
+}
+
+.config-section .planner-settings-details {
+  border-radius: var(--radius-xl);
+}
+
+.config-section .settings-summary {
+  padding: 18px 22px;
+}
+
+.config-section .planner-settings-card {
+  padding: 0 22px 22px;
+}
+
+.config-section .settings-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .planner-settings-card {
@@ -1527,7 +1573,8 @@ button:disabled {
   .topic-list,
   .wiki-todo-list,
   .wiki-actions,
-  .wiki-steps {
+  .wiki-steps,
+  .config-section .settings-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1556,6 +1603,7 @@ button:disabled {
   .hero-meta,
   .time-grid,
   .settings-grid,
+  .config-section .settings-grid,
   .hero-flow,
   .topic-list,
   .wiki-todo-list,

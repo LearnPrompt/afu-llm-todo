@@ -13,8 +13,6 @@ const state = {
   topics: [],
   inboxCandidates: [],
   inboxSummary: null,
-  diagnostics: null,
-  diagnosticsExpanded: false,
   settings: null,
   configPath: "",
   lark: null,
@@ -86,11 +84,6 @@ const elements = {
   vaultRootLabel: document.querySelector("#vaultRootLabel"),
   workspaceModeObsidian: document.querySelector("#modeObsidian"),
   workspaceModeStandalone: document.querySelector("#modeStandalone"),
-  diagnosticsBtn: document.querySelector("#diagnosticsBtn"),
-  diagnosticsPanel: document.querySelector("#diagnosticsPanel"),
-  wikiHint: document.querySelector("#wikiHint"),
-  wikiResult: document.querySelector("#wikiResult"),
-  wikiTodoList: document.querySelector("#wikiTodoList"),
   larkRepairBtn: document.querySelector("#larkRepairBtn"),
   workspaceKind: document.querySelector("#workspaceKind"),
   workspaceConfigPath: document.querySelector("#workspaceConfigPath"),
@@ -237,7 +230,6 @@ function bindEvents() {
       elements.plannerSettingsDetails.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   });
-  elements.diagnosticsBtn?.addEventListener("click", () => toggleDiagnostics());
   elements.plannerSettingsForm?.addEventListener("submit", submitPlannerSettings);
   document.querySelectorAll('input[name="workspaceMode"]').forEach((input) => {
     input.addEventListener("change", () => applyWorkspaceMode(input.value));
@@ -353,7 +345,9 @@ function renderHero() {
   elements.weekLabel.textContent = `${weekDays[0].displayShort} - ${weekDays[6].displayShort}`;
   elements.workspaceKind.textContent = getWorkspaceKind(state.settings);
   if (elements.workspaceConfigPath) {
-    const vaultDisplay = state.settings?.vaultRoot || state.configPath || "未配置";
+    const vaultDisplay = state.settings?.workspaceMode === 'standalone'
+      ? (state.settings?.topicDir || "未配置")
+      : (state.settings?.vaultRoot || state.configPath || "未配置");
     elements.workspaceConfigPath.textContent = vaultDisplay;
     elements.workspaceConfigPath.title = vaultDisplay;
   }
@@ -482,7 +476,7 @@ function renderInboxCandidates() {
   state.inboxPage = currentPage;
   elements.inboxCandidateList.innerHTML = '';
   elements.inboxHint.textContent = candidates.length
-    ? '直接转卡：单条素材快速进入题库；Wiki：批量素材先合并判断，再生成行动卡。'
+    ? '直接转卡：单条素材快速进入排期池；勾选多条可批量转卡，相同内容自动合并。'
     : `当前工作区：${getWorkspaceKind(state.settings)}；已扫描 ${summary.inboxMarkdownFiles ?? 0} 个收件箱 Markdown。`;
   elements.inboxPrevBtn.disabled = currentPage === 1 || candidates.length === 0;
   elements.inboxNextBtn.disabled = currentPage === totalPages || candidates.length === 0;
@@ -1269,8 +1263,8 @@ async function importSelectedInboxCandidates(sourcePaths = Array.from(state.sele
     setWorkspaceView("inbox");
     const failedCount = (data.failed || []).length;
     const message = failedCount
-      ? `已转入题库 ${data.created.length} 条，失败 ${failedCount} 条。`
-      : `已转入题库 ${data.created.length} 条。`;
+      ? `已转入排期池 ${data.created.length} 条，失败 ${failedCount} 条。`
+      : `已转入排期池 ${data.created.length} 条。`;
 
     if ((data.created || []).length) {
       state.scheduleQueue = (data.created || []).map((item) => ({ path: item.path, title: item.title }));
@@ -1333,64 +1327,6 @@ function renderScheduleDaySidebar() {
   );
 }
 
-async function toggleDiagnostics() {
-  if (state.diagnostics) {
-    state.diagnosticsExpanded = !state.diagnosticsExpanded;
-    renderDiagnostics();
-    return;
-  }
-  state.diagnosticsExpanded = true;
-  await loadDiagnostics();
-}
-
-async function loadDiagnostics() {
-  setBusy(true);
-  try {
-    const response = await fetch('/api/diagnostics');
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || '诊断失败');
-    }
-    state.diagnostics = data;
-    renderDiagnostics();
-    elements.wikiResult.textContent = `当前模式：${data.settings?.wikiMode || 'off'}；日历目标：${data.settings?.calendarProvider || 'none'}。`;
-    elements.wikiResult.classList.remove("empty-state");
-  } catch (error) {
-    elements.diagnosticsPanel.innerHTML = `<div class="diagnostics-summary warn">${escapeHtml(error.message)}</div>`;
-  } finally {
-    setBusy(false);
-  }
-}
-
-function renderDiagnostics() {
-  const data = state.diagnostics;
-  if (!data) {
-    elements.diagnosticsPanel.innerHTML = "";
-    elements.diagnosticsPanel.classList.add("is-collapsed");
-    return;
-  }
-  const summary = data.summary || {};
-  elements.diagnosticsPanel.classList.toggle("is-collapsed", !state.diagnosticsExpanded);
-  elements.diagnosticsBtn.textContent = state.diagnosticsExpanded ? "收起配置" : "展开配置";
-  elements.diagnosticsPanel.innerHTML = `
-    <div class="diagnostics-summary ${data.ok ? 'ok' : 'warn'}">
-      ${data.ok ? '配置可用' : '配置需要处理'} · 收件箱 ${summary.inboxCandidateFiles ?? 0}/${summary.inboxMarkdownFiles ?? 0} 可转
-    </div>
-    <div class="diagnostics-details">
-      ${(data.checks || []).map((item) => `
-        <div class="diagnostics-row ${item.ok ? 'ok' : 'warn'}">
-          <strong>${escapeHtml(item.label)}</strong>
-          <span>${item.ok ? `OK · ${item.note ? escapeHtml(item.note) : (item.recursiveMarkdownCount ?? item.markdownCount ?? item.count ?? '')}` : escapeHtml(item.error || '失败')}</span>
-        </div>
-      `).join('')}
-      <div class="diagnostics-row ok">
-        <strong>收件箱过滤</strong>
-        <span>候选 ${summary.inboxCandidateFiles ?? 0} · 已转卡 ${summary.inboxSkippedAlreadyImported ?? 0} · 已处理 ${summary.inboxSkippedProcessed ?? 0} · 低信息量 ${summary.inboxLowInformation ?? summary.inboxSkippedShort ?? 0} · 系统文件 ${summary.inboxSkippedSystem ?? 0}</span>
-      </div>
-    </div>
-  `;
-}
-
 function getCurrentInboxPageCandidates() {
   const candidates = state.inboxCandidates || [];
   const totalPages = Math.max(1, Math.ceil(candidates.length / state.inboxPageSize));
@@ -1424,7 +1360,7 @@ function pruneSelectedInboxPaths() {
 
 function showTopicToast(message, topic) {
   showToast(message, topic?.title ? {
-    label: '查看题库',
+    label: '查看排期池',
     onClick: () => openBacklogWithRecent(topic),
   } : null);
 }
@@ -1524,9 +1460,6 @@ async function submitPlannerSettings(event) {
       throw new Error(data.error || '保存目录设置失败');
     }
     state.settings = data.settings || payload;
-    state.diagnostics = null;
-    state.diagnosticsExpanded = false;
-    renderDiagnostics();
     elements.plannerSettingsHint.textContent = '目录设置已保存。';
     await loadTopics();
     await loadSettingsDiagnostics();
@@ -1543,13 +1476,18 @@ function applyWorkspaceMode(mode) {
     elements.vaultRootLabel.hidden = isStandalone;
   }
   if (elements.plannerTopicDir) {
-    elements.plannerTopicDir.placeholder = isStandalone ? '/Users/you/topics' : '15_自媒体/选题库';
+    elements.plannerTopicDir.placeholder = isStandalone ? '/Users/you/选题库' : '15_自媒体/选题库';
   }
   if (elements.plannerInboxDir) {
-    elements.plannerInboxDir.placeholder = isStandalone ? '/Users/you/inbox' : '00_收件箱';
+    elements.plannerInboxDir.placeholder = isStandalone ? '/Users/you/收件箱' : '00_收件箱';
   }
   if (elements.plannerArchiveDir) {
-    elements.plannerArchiveDir.placeholder = isStandalone ? '/Users/you/archive' : '99_系统/归档/选题占位';
+    elements.plannerArchiveDir.placeholder = isStandalone ? '/Users/you/归档' : '99_系统/归档/选题占位';
+  }
+  if (elements.plannerSettingsHint) {
+    elements.plannerSettingsHint.textContent = isStandalone
+      ? '独立模式：三个目录都填本机绝对路径，不需要 Obsidian。'
+      : 'Obsidian 模式：填 Vault 根目录，三个目录用相对路径。';
   }
 }
 
@@ -1562,17 +1500,22 @@ async function loadSettingsDiagnostics() {
   try {
     const response = await fetch('/api/diagnostics');
     const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || '诊断失败');
+    }
     const failed = (data.checks || []).filter((c) => !c.ok);
-    if (failed.length === 0) {
+    if (data.ok && failed.length === 0) {
       banner.className = 'settings-diag-banner is-ok';
       banner.textContent = '✓ 路径验证通过，已准备就绪';
     } else {
       banner.className = 'settings-diag-banner is-warn';
-      banner.textContent = `⚠ 有 ${failed.length} 个路径无法访问：${failed.map((c) => c.label).join('、')}`;
+      banner.textContent = failed.length
+        ? `⚠ 有 ${failed.length} 个路径无法访问：${failed.map((c) => c.label).join('、')}`
+        : '⚠ 配置需要处理，请检查目录设置';
     }
-  } catch {
+  } catch (error) {
     banner.className = 'settings-diag-banner is-warn';
-    banner.textContent = '⚠ 路径验证失败，请检查配置';
+    banner.textContent = `⚠ 路径验证失败：${error.message}`;
   }
 }
 

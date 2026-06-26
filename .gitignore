@@ -8,3 +8,4 @@ examples/sample-vault/topic-planner.config.json
 # Runtime artifacts.
 *.log
 *.tmp
+.gstack/

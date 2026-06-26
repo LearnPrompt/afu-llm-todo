@@ -56,11 +56,6 @@
               <button id="larkRepairBtn" class="meta-action" type="button" hidden>配置飞书</button>
             </div>
             <div class="meta-card">
-              <span>当前工作区</span>
-              <strong id="workspaceKind">检测中</strong>
-              <small id="workspaceConfigPath">配置文件检测中</small>
-            </div>
-            <div class="meta-card">
               <span>本周排期</span>
               <strong id="weekScheduledCount">0</strong>
             </div>
@@ -76,9 +71,17 @@
         </div>
         <div class="hero-side">
           <img src="./afu-mascot.png" alt="管家阿福" class="hero-mascot" />
-          <details id="plannerSettingsDetails" class="planner-settings-details">
+        </div>
+      </section>
+
+      <section class="config-section">
+        <details id="plannerSettingsDetails" class="planner-settings-details" open>
             <summary class="settings-summary">
               <span class="settings-summary-label">工作区设置</span>
+              <span class="settings-summary-workspace">
+                <strong id="workspaceKind">检测中</strong>
+                <small id="workspaceConfigPath">配置文件检测中</small>
+              </span>
               <span id="plannerSettingsHint" class="settings-summary-hint">确认目录和同步目标，保存后刷新数据。</span>
             </summary>
             <form id="plannerSettingsForm" class="planner-settings-card">
@@ -153,8 +156,7 @@
               </div>
               <div id="settingsDiagBanner" class="settings-diag-banner" hidden></div>
             </form>
-          </details>
-        </div>
+        </details>
       </section>
 
       <section class="toolbar">
@@ -180,7 +182,7 @@
         <aside class="backlog-panel">
           <div class="workspace-tabs" role="tablist" aria-label="阿福素材面板">
             <button class="workspace-tab is-active" type="button" data-workspace-view="inbox">收件箱</button>
-            <button class="workspace-tab" type="button" data-workspace-view="backlog">题库</button>
+            <button class="workspace-tab" type="button" data-workspace-view="backlog">排期池</button>
           </div>
 
           <section class="sidebar-view inbox-panel is-active" data-view-panel="inbox">
@@ -217,26 +219,10 @@
             <div id="inboxCandidateList" class="inbox-candidate-list"></div>
           </section>
 
-          <section class="sidebar-view wiki-panel" data-view-panel="wiki">
-            <div class="panel-head panel-head-compact">
-              <div>
-                <p class="panel-tag">阿福诊断</p>
-                <h2>配置 &amp; 状态</h2>
-              </div>
-              <span id="wikiHint">素材重复合并已内置于转卡流程，无需手动编译。</span>
-            </div>
-            <div class="wiki-actions">
-              <button id="diagnosticsBtn" class="ghost-btn" type="button">展开配置</button>
-            </div>
-            <div id="diagnosticsPanel" class="diagnostics-panel is-collapsed"></div>
-            <div id="wikiResult" class="wiki-result">点击"展开配置"检查 Vault 路径、收件箱目录等设置。</div>
-            <div id="wikiTodoList" class="wiki-todo-list"></div>
-          </section>
-
           <section class="sidebar-view" data-view-panel="backlog">
             <div class="panel-head">
               <div>
-                <p class="panel-tag">阿福题库</p>
+                <p class="panel-tag">阿福排期池</p>
                 <h2>待排期选题</h2>
               </div>
               <span id="backlogHint">筛选后挑一张，拖到右侧周历。</span>

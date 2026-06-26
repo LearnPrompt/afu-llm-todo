@@ -873,11 +873,24 @@ async function disposeTopic(payload) {
   await fs.mkdir(path.dirname(archivePath), { recursive: true });
   await fs.writeFile(archivePath, updatedContent, "utf8");
   await fs.unlink(filePath);
+
+  let inboxSourceDeleted = false;
+  if (topic.sourceInboxPath) {
+    try {
+      const inboxSourceAbs = await resolveInboxPath(topic.sourceInboxPath);
+      await fs.unlink(inboxSourceAbs);
+      inboxSourceDeleted = true;
+    } catch (e) {
+      if (e.code !== "ENOENT") throw e;
+    }
+  }
+
   await appendPlannerLog("topic-disposition", title, {
     path: source.relPath,
     action,
     reason,
     archivePath: path.relative((await getPlannerPaths()).vaultRoot, archivePath),
+    ...(topic.sourceInboxPath && { inboxSourcePath: topic.sourceInboxPath, inboxSourceDeleted }),
   });
 
   return {

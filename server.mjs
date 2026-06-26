@@ -1538,13 +1538,15 @@ async function getLarkStatusForce() {
 }
 
 function normalizeLarkStatus(status, overrides = {}) {
-  const tokenStatus = status.tokenStatus || "unknown";
+  // lark-cli >=1.x 把用户授权信息嵌套到 identities.user.*；旧版是顶层字段，做兼容回退
+  const user = (status && status.identities && status.identities.user) || {};
+  const tokenStatus = user.tokenStatus || status.tokenStatus || "unknown";
   const value = {
     available: false,
-    identity: status.identity || "",
-    userName: status.userName || "",
+    identity: user.openId || status.identity || "",
+    userName: user.userName || status.userName || "",
     tokenStatus,
-    expiresAt: status.expiresAt || "",
+    expiresAt: user.expiresAt || status.expiresAt || "",
     canRepair: overrides.canRepair ?? true,
     autoRecovered: Boolean(overrides.autoRecovered),
     setupState: tokenStatus === "valid" ? "calendar_checking" : tokenStatus === "needs_refresh" ? "auth_refresh_needed" : "auth_invalid",

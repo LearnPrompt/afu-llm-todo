@@ -1129,8 +1129,8 @@ function getLarkConnectorView(lark) {
     return {
       badge: "已连接",
       tone: "is-ok",
-      message: "飞书日历已可用，排期时可以同步到主日历。",
-      account: `账号：${lark.userName || "当前用户"} · 主日历：${lark.calendarName || "主日历"}`,
+      message: "飞书日历已可用，排期时可以同步到主日历。授权来自本机 lark-cli 已登录的账号，请核对下方是不是你本人。",
+      account: `账号：${lark.userName || "当前用户"}（本机 lark-cli 登录）· 主日历：${lark.calendarName || "主日历"}`,
       button: "已连接",
       action: "none",
       disabled: true,

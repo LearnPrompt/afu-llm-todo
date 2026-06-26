@@ -198,8 +198,9 @@ async function getPlannerSettingsPayload() {
 }
 
 async function savePlannerSettingsPayload(payload) {
-  if (!optionalString(payload.vaultRoot)) {
-    throw badRequest("Vault 根目录不能为空");
+  const workspaceMode = payload.workspaceMode === 'standalone' ? 'standalone' : 'obsidian';
+  if (workspaceMode === 'obsidian' && !optionalString(payload.vaultRoot)) {
+    throw badRequest("Obsidian 模式必须填写 Vault 根目录");
   }
 
   if (isDemoConfigRun()) {
@@ -222,7 +223,9 @@ async function savePlannerSettingsPayload(payload) {
 async function buildDiagnosticsPayload() {
   const paths = await getPlannerPaths();
   const checks = [];
-  await pushDirCheck(checks, "Vault 根目录", paths.vaultRoot);
+  if (paths.settings.workspaceMode !== 'standalone') {
+    await pushDirCheck(checks, "Vault 根目录", paths.vaultRoot);
+  }
   await pushDirCheck(checks, "选题目录", paths.topicDir);
   await pushDirCheck(checks, "收件箱目录", paths.inboxDir);
   await pushDirCheck(checks, "归档目录", paths.archiveRoot);

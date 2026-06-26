@@ -31,22 +31,22 @@
             <div class="flow-step">
               <span>01</span>
               <strong>接入工作区</strong>
-              <p>选择 Vault 根目录和素材目录，保存即生效。</p>
+              <p>告诉阿福你的选题库、收件箱和归档在哪。Obsidian 用相对路径，不用 Obsidian 就填绝对路径。</p>
             </div>
             <div class="flow-step">
               <span>02</span>
               <strong>转卡去重</strong>
-              <p>素材一键转成选题卡，重复内容自动追加合并。</p>
+              <p>收件箱里的网页、笔记、文章一键变选题卡，相同内容自动识别合并，不制造重复。</p>
             </div>
             <div class="flow-step">
               <span>03</span>
               <strong>挑题排期</strong>
-              <p>从题库挑选卡片，拖进周历安排时间。</p>
+              <p>从题库挑一张想做的卡，拖进周历对应日期，设好时间段，排期就落定了。</p>
             </div>
             <div class="flow-step">
               <span>04</span>
               <strong>同步写回</strong>
-              <p>回写 Markdown，可选同步外部日历。</p>
+              <p>排期写回 Markdown 文件，可选同步到飞书日历或 macOS 日历，手机电脑都能看到。</p>
             </div>
           </div>
           <div class="hero-meta">
@@ -82,9 +82,19 @@
               <span id="plannerSettingsHint" class="settings-summary-hint">确认目录和同步目标，保存后刷新数据。</span>
             </summary>
             <form id="plannerSettingsForm" class="planner-settings-card">
-              <label>
+              <div class="settings-mode-row">
+                <label class="mode-radio-label">
+                  <input type="radio" name="workspaceMode" value="obsidian" id="modeObsidian" />
+                  <span>Obsidian 模式</span>
+                </label>
+                <label class="mode-radio-label">
+                  <input type="radio" name="workspaceMode" value="standalone" id="modeStandalone" />
+                  <span>独立模式（不用 Obsidian）</span>
+                </label>
+              </div>
+              <label id="vaultRootLabel">
                 Vault 根目录
-                <input id="plannerVaultRoot" type="text" placeholder="/Users/you/ObsidianVault" required />
+                <input id="plannerVaultRoot" type="text" placeholder="/Users/you/ObsidianVault" />
               </label>
               <div class="settings-grid">
                 <label>
@@ -141,6 +151,7 @@
               <div class="settings-actions">
                 <button class="accent-btn" type="submit">保存目录设置</button>
               </div>
+              <div id="settingsDiagBanner" class="settings-diag-banner" hidden></div>
             </form>
           </details>
         </div>
@@ -169,7 +180,6 @@
         <aside class="backlog-panel">
           <div class="workspace-tabs" role="tablist" aria-label="阿福素材面板">
             <button class="workspace-tab is-active" type="button" data-workspace-view="inbox">收件箱</button>
-            <button class="workspace-tab" type="button" data-workspace-view="wiki">诊断</button>
             <button class="workspace-tab" type="button" data-workspace-view="backlog">题库</button>
           </div>
 

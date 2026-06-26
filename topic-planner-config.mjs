@@ -20,6 +20,10 @@ const DEFAULT_WIKI = {
   wikiMode: 'off',
 };
 
+const DEFAULT_WORKSPACE = {
+  workspaceMode: 'obsidian',
+};
+
 const DEFAULT_SCHEDULE = {
   dailyCapacity: 2,
   scheduleTimeSlots: [
@@ -39,6 +43,7 @@ function defaultVaultRoot(projectRoot = process.cwd()) {
 function createDefaultPlannerSettings(projectRoot = process.cwd()) {
   return {
     vaultRoot: defaultVaultRoot(projectRoot),
+    ...DEFAULT_WORKSPACE,
     ...DEFAULT_DIRS,
     ...DEFAULT_CALENDAR,
     ...DEFAULT_WIKI,
@@ -53,6 +58,18 @@ function trimTrailingSlashes(value) {
 function normalizeRelativeDir(value, fallback) {
   const trimmed = trimTrailingSlashes(value).replace(/^[\\/]+/g, '');
   return trimmed || fallback;
+}
+
+function normalizeWorkspaceMode(value) {
+  return ['obsidian', 'standalone'].includes(String(value || '').trim()) ? value : 'obsidian';
+}
+
+function normalizeDirForMode(value, fallback, mode) {
+  if (mode === 'standalone') {
+    const trimmed = trimTrailingSlashes(value);
+    return trimmed || fallback;
+  }
+  return normalizeRelativeDir(value, fallback);
 }
 
 function normalizeCalendarProvider(value, fallback = DEFAULT_CALENDAR.calendarProvider) {
@@ -88,11 +105,13 @@ function normalizeScheduleTimeSlots(value, fallback = DEFAULT_SCHEDULE.scheduleT
 
 function normalizePlannerSettings(settings = {}, projectRoot = process.cwd()) {
   const defaults = createDefaultPlannerSettings(projectRoot);
+  const workspaceMode = normalizeWorkspaceMode(settings.workspaceMode);
   return {
+    workspaceMode,
     vaultRoot: trimTrailingSlashes(settings.vaultRoot || defaults.vaultRoot) || defaults.vaultRoot,
-    topicDir: normalizeRelativeDir(settings.topicDir, defaults.topicDir),
-    inboxDir: normalizeRelativeDir(settings.inboxDir, defaults.inboxDir),
-    archiveDir: normalizeRelativeDir(settings.archiveDir, defaults.archiveDir),
+    topicDir: normalizeDirForMode(settings.topicDir, defaults.topicDir, workspaceMode),
+    inboxDir: normalizeDirForMode(settings.inboxDir, defaults.inboxDir, workspaceMode),
+    archiveDir: normalizeDirForMode(settings.archiveDir, defaults.archiveDir, workspaceMode),
     calendarProvider: normalizeCalendarProvider(settings.calendarProvider, defaults.calendarProvider),
     macosCalendarName: String(settings.macosCalendarName || defaults.macosCalendarName).trim(),
     wikiMode: normalizeWikiMode(settings.wikiMode, defaults.wikiMode),
@@ -106,6 +125,14 @@ function normalizePlannerSettings(settings = {}, projectRoot = process.cwd()) {
 
 function resolvePlannerPaths(settings) {
   const normalized = normalizePlannerSettings(settings);
+  if (normalized.workspaceMode === 'standalone') {
+    const topicDir = path.resolve(normalized.topicDir);
+    const inboxDir = path.resolve(normalized.inboxDir);
+    const archiveRoot = path.resolve(normalized.archiveDir);
+    // Use the filesystem root so path.relative(vaultRoot, ...) still produces valid strings
+    const vaultRoot = path.parse(topicDir).root;
+    return { vaultRoot, topicDir, inboxDir, archiveRoot, wikiRoot: topicDir, wikiIndexPath: '', wikiLogPath: '' };
+  }
   return {
     vaultRoot: normalized.vaultRoot,
     topicDir: path.join(normalized.vaultRoot, normalized.topicDir),

@@ -218,11 +218,10 @@ body {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
-  max-width: 880px;
+  align-items: stretch;
 }
 
 .flow-step {
-  min-height: 136px;
   padding: 16px;
   border-radius: 18px;
   border: 1px solid rgba(36, 25, 13, 0.1);
@@ -251,7 +250,6 @@ body {
 
 .hero-meta {
   margin-top: 18px;
-  max-width: 880px;
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 12px;
@@ -357,6 +355,65 @@ body {
 .settings-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+.settings-mode-row {
+  display: flex;
+  gap: 20px;
+  padding: 10px 0 2px;
+}
+
+.mode-radio-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.mode-radio-label input[type="radio"] {
+  accent-color: var(--accent);
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+.settings-diag-banner {
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.settings-diag-banner.is-ok {
+  background: rgba(22, 101, 52, 0.08);
+  color: #1a6a3a;
+  border: 1px solid rgba(22, 101, 52, 0.15);
+}
+
+.settings-diag-banner.is-warn {
+  background: rgba(180, 82, 45, 0.08);
+  color: #8f3a1a;
+  border: 1px solid rgba(180, 82, 45, 0.15);
+}
+
+.settings-diag-banner.is-checking {
+  background: rgba(36, 25, 13, 0.05);
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+
+[data-theme="dark"] .settings-diag-banner.is-ok {
+  background: rgba(22, 101, 52, 0.18);
+  color: #6fcf97;
+}
+
+[data-theme="dark"] .settings-diag-banner.is-warn {
+  background: rgba(180, 82, 45, 0.18);
+  color: #f2994a;
 }
 
 .lark-setup-panel {
@@ -599,7 +656,7 @@ button:disabled {
 
 .workspace-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 16px;
   padding: 6px;

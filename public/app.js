@@ -82,6 +82,10 @@ const elements = {
   copyLarkAuthBtn: document.querySelector("#copyLarkAuthBtn"),
   plannerMacosCalendarName: document.querySelector("#plannerMacosCalendarName"),
   plannerSettingsHint: document.querySelector("#plannerSettingsHint"),
+  settingsDiagBanner: document.querySelector("#settingsDiagBanner"),
+  vaultRootLabel: document.querySelector("#vaultRootLabel"),
+  workspaceModeObsidian: document.querySelector("#modeObsidian"),
+  workspaceModeStandalone: document.querySelector("#modeStandalone"),
   diagnosticsBtn: document.querySelector("#diagnosticsBtn"),
   diagnosticsPanel: document.querySelector("#diagnosticsPanel"),
   wikiHint: document.querySelector("#wikiHint"),
@@ -235,6 +239,9 @@ function bindEvents() {
   });
   elements.diagnosticsBtn?.addEventListener("click", () => toggleDiagnostics());
   elements.plannerSettingsForm?.addEventListener("submit", submitPlannerSettings);
+  document.querySelectorAll('input[name="workspaceMode"]').forEach((input) => {
+    input.addEventListener("change", () => applyWorkspaceMode(input.value));
+  });
   elements.prevWeekBtn.addEventListener("click", () => {
     state.weekOffset -= 1;
     render();
@@ -317,7 +324,7 @@ function render() {
 }
 
 function setWorkspaceView(view) {
-  state.workspaceView = ["backlog", "inbox", "wiki"].includes(view) ? view : "backlog";
+  state.workspaceView = ["backlog", "inbox"].includes(view) ? view : "inbox";
   renderWorkspaceView();
 }
 
@@ -400,6 +407,13 @@ function renderHero() {
 
 function renderPlannerSettings() {
   if (!state.settings || !elements.plannerSettingsForm) return;
+  const mode = state.settings.workspaceMode || 'obsidian';
+  if (mode === 'standalone' && elements.workspaceModeStandalone) {
+    elements.workspaceModeStandalone.checked = true;
+  } else if (elements.workspaceModeObsidian) {
+    elements.workspaceModeObsidian.checked = true;
+  }
+  applyWorkspaceMode(mode);
   elements.plannerVaultRoot.value = state.settings.vaultRoot || '';
   elements.plannerTopicDir.value = state.settings.topicDir || '';
   elements.plannerInboxDir.value = state.settings.inboxDir || '';
@@ -1481,8 +1495,10 @@ function clearBacklogFilters() {
 
 async function submitPlannerSettings(event) {
   event.preventDefault();
+  const workspaceMode = document.querySelector('input[name="workspaceMode"]:checked')?.value || 'obsidian';
   const payload = {
-    vaultRoot: elements.plannerVaultRoot.value.trim(),
+    workspaceMode,
+    vaultRoot: workspaceMode === 'standalone' ? '' : elements.plannerVaultRoot.value.trim(),
     topicDir: elements.plannerTopicDir.value.trim(),
     inboxDir: elements.plannerInboxDir.value.trim(),
     archiveDir: elements.plannerArchiveDir.value.trim(),
@@ -1511,12 +1527,52 @@ async function submitPlannerSettings(event) {
     state.diagnostics = null;
     state.diagnosticsExpanded = false;
     renderDiagnostics();
-    elements.plannerSettingsHint.textContent = '目录设置已保存，当前页面会按新路径重新加载。';
+    elements.plannerSettingsHint.textContent = '目录设置已保存。';
     await loadTopics();
+    await loadSettingsDiagnostics();
   } catch (error) {
     elements.plannerSettingsHint.textContent = error.message;
   } finally {
     setBusy(false);
+  }
+}
+
+function applyWorkspaceMode(mode) {
+  const isStandalone = mode === 'standalone';
+  if (elements.vaultRootLabel) {
+    elements.vaultRootLabel.hidden = isStandalone;
+  }
+  if (elements.plannerTopicDir) {
+    elements.plannerTopicDir.placeholder = isStandalone ? '/Users/you/topics' : '15_自媒体/选题库';
+  }
+  if (elements.plannerInboxDir) {
+    elements.plannerInboxDir.placeholder = isStandalone ? '/Users/you/inbox' : '00_收件箱';
+  }
+  if (elements.plannerArchiveDir) {
+    elements.plannerArchiveDir.placeholder = isStandalone ? '/Users/you/archive' : '99_系统/归档/选题占位';
+  }
+}
+
+async function loadSettingsDiagnostics() {
+  const banner = elements.settingsDiagBanner;
+  if (!banner) return;
+  banner.hidden = false;
+  banner.className = 'settings-diag-banner is-checking';
+  banner.textContent = '正在验证路径…';
+  try {
+    const response = await fetch('/api/diagnostics');
+    const data = await response.json();
+    const failed = (data.checks || []).filter((c) => !c.ok);
+    if (failed.length === 0) {
+      banner.className = 'settings-diag-banner is-ok';
+      banner.textContent = '✓ 路径验证通过，已准备就绪';
+    } else {
+      banner.className = 'settings-diag-banner is-warn';
+      banner.textContent = `⚠ 有 ${failed.length} 个路径无法访问：${failed.map((c) => c.label).join('、')}`;
+    }
+  } catch {
+    banner.className = 'settings-diag-banner is-warn';
+    banner.textContent = '⚠ 路径验证失败，请检查配置';
   }
 }
 
@@ -1619,6 +1675,7 @@ function getScheduleTimeSlots() {
 }
 
 function getWorkspaceKind(settings) {
+  if (settings?.workspaceMode === 'standalone') return "独立模式";
   const root = String(settings?.vaultRoot || "");
   if (!root) return "未配置";
   return root.includes("/examples/sample-vault") ? "Sample Vault" : "真实 Vault";

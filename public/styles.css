@@ -8,6 +8,11 @@
   --accent: #b6522d;
   --accent-soft: rgba(182, 82, 45, 0.14);
   --danger: #8f1d12;
+  --control-surface: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.9),
+    rgba(250, 241, 231, 0.9)
+  );
   --shadow: 0 24px 60px rgba(64, 39, 8, 0.12);
   --radius-xl: 28px;
   --radius-lg: 20px;
@@ -24,6 +29,11 @@
   --accent: #e0683a;
   --accent-soft: rgba(224, 104, 58, 0.2);
   --danger: #d44040;
+  --control-surface: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.065),
+    rgba(255, 220, 160, 0.035)
+  );
   --shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
 }
 
@@ -1041,9 +1051,8 @@ button:disabled {
   padding: 12px;
   margin-bottom: 16px;
   border-radius: 18px;
-  background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.9), rgba(250, 241, 231, 0.9));
-  border: 1px solid rgba(36, 25, 13, 0.08);
+  background: var(--control-surface);
+  border: 1px solid var(--line);
 }
 
 .pager-group {

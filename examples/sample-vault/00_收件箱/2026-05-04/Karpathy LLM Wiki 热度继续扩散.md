@@ -8,4 +8,4 @@ tags:
   - Karpathy
 ---
 
-Karpathy 的 LLM Wiki 思路继续扩散。重点不是 RAG，而是让 LLM 持续维护一个会增长的 Markdown Wiki。这个思路可以连接内容排期：Wiki 里的研究结论应该长出 Todo。
+看一下 Karpathy 讲的 LLM Wiki 思路，重点不是 RAG，而是让 Markdown Wiki 持续增长。整理一条内容判断：Wiki 里的研究结论怎么长出后续 todo。

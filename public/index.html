@@ -148,7 +148,10 @@
                 </div>
                 <label>
                   macOS 日历名
-                  <input id="plannerMacosCalendarName" type="text" placeholder="留空则使用第一个本地日历" />
+                  <select id="plannerMacosCalendarName">
+                    <option value="">选择同步到 macOS 后自动读取</option>
+                  </select>
+                  <span id="plannerMacosCalendarStatus" class="form-hint">只显示 Calendar.app 里可写入的日历。</span>
                 </label>
               </div>
               <div class="settings-actions">
@@ -272,7 +275,7 @@
             <p class="panel-tag">每日收件箱</p>
             <h3 id="dailyInboxTitle">处理当天收件箱</h3>
           </div>
-          <button class="ghost-btn" type="button" data-close="dailyInboxDialog">稍后</button>
+          <button class="icon-btn modal-close" type="button" data-close="dailyInboxDialog" aria-label="稍后处理">×</button>
         </div>
         <p id="dailyInboxSummary" class="daily-inbox-summary">正在检查当天候选。</p>
         <div id="dailyInboxList" class="daily-inbox-list"></div>
@@ -291,13 +294,13 @@
     </dialog>
 
     <dialog id="scheduleDialog" class="modal">
-      <form method="dialog" class="modal-card" id="scheduleForm">
+      <form method="dialog" class="modal-card schedule-card" id="scheduleForm">
         <div class="modal-head">
           <div>
             <p class="panel-tag">排期</p>
             <h3 id="scheduleTitle">排期选题</h3>
           </div>
-          <button class="ghost-btn" type="button" data-close="scheduleDialog">关闭</button>
+          <button class="icon-btn modal-close" type="button" data-close="scheduleDialog" aria-label="关闭排期弹窗">×</button>
         </div>
         <label>
           日期
@@ -329,7 +332,7 @@
         <div id="scheduleDaySidebar" class="schedule-day-sidebar"></div>
         <div class="modal-actions">
           <button class="ghost-btn" type="button" data-close="scheduleDialog">取消</button>
-          <button class="accent-btn" type="submit">保存排期</button>
+          <button id="scheduleSubmitBtn" class="accent-btn" type="submit">保存排期</button>
         </div>
       </form>
     </dialog>
@@ -341,15 +344,16 @@
             <p class="panel-tag">作废</p>
             <h3 id="disposeTitle">处理选题</h3>
           </div>
-          <button class="ghost-btn" type="button" data-close="disposeDialog">关闭</button>
+          <button class="icon-btn modal-close" type="button" data-close="disposeDialog" aria-label="关闭处理弹窗">×</button>
         </div>
         <label>
           动作
           <select id="disposeAction" required>
-            <option value="拒绝">拒绝但保留卡片</option>
-            <option value="过期归档">删除并移出活动选题库</option>
+            <option value="拒绝">标记拒绝，保留行动卡片</option>
+            <option value="过期归档">归档卡片，并删除原始素材</option>
           </select>
         </label>
+        <div id="disposeActionHint" class="dispose-action-hint"></div>
         <div class="field-label">原因</div>
         <div id="disposeReasonChips" class="dispose-reason-chips">
           <button type="button" class="reason-chip" data-reason="热点窗口已过">热点窗口已过</button>
@@ -385,7 +389,7 @@
             <p class="panel-tag">飞书授权</p>
             <h3>恢复日历同步</h3>
           </div>
-          <button class="ghost-btn" type="button" data-close="larkAuthDialog">关闭</button>
+          <button class="icon-btn modal-close" type="button" data-close="larkAuthDialog" aria-label="关闭飞书授权弹窗">×</button>
         </div>
         <p id="larkAuthMessage" class="auth-copy">
           页面会先打开飞书授权页。完成后，回来点“我已完成授权”。
@@ -399,6 +403,24 @@
         <p id="larkAuthExpires" class="auth-expire">授权会话将在 10 分钟后过期。</p>
         <div class="modal-actions">
           <button id="larkAuthCompleteBtn" class="accent-btn" type="button">我已完成授权</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="importResultDialog" class="modal">
+      <div class="modal-card import-result-card">
+        <div class="modal-head">
+          <div>
+            <p class="panel-tag">转卡完成</p>
+            <h3 id="importResultTitle">已转入排期池</h3>
+          </div>
+          <button class="icon-btn modal-close" type="button" data-close="importResultDialog" aria-label="关闭转卡结果">×</button>
+        </div>
+        <p id="importResultSummary" class="import-result-summary">新卡片已经创建。</p>
+        <div id="importResultList" class="import-result-list"></div>
+        <div class="modal-actions import-result-actions">
+          <button id="importResultBacklogBtn" class="ghost-btn" type="button">先放排期池</button>
+          <button id="importResultScheduleBtn" class="accent-btn" type="button">现在排期</button>
         </div>
       </div>
     </dialog>
@@ -419,6 +441,7 @@
         <div class="topic-actions">
           <button class="mini-btn" data-action="schedule" type="button">排期</button>
           <button class="mini-btn" data-action="unschedule" type="button">取消排期</button>
+          <button class="mini-btn" data-action="revert-import" type="button">撤回转卡</button>
           <button class="mini-btn" data-action="dispose" type="button">拒绝 / 删除</button>
         </div>
       </article>

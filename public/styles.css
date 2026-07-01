@@ -56,6 +56,7 @@
 [data-theme="dark"] .mini-btn {
   background: rgba(255, 255, 255, 0.06);
   border-color: rgba(255, 220, 160, 0.1);
+  color: var(--text);
 }
 
 [data-theme="dark"] .meta-card,
@@ -89,6 +90,48 @@
 [data-theme="dark"] .inbox-card {
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 220, 160, 0.1);
+}
+
+[data-theme="dark"] .inline-confirm,
+[data-theme="dark"] .daily-inbox-item,
+[data-theme="dark"] .daily-inbox-confirm,
+[data-theme="dark"] .auth-code-panel,
+[data-theme="dark"] .import-result-item,
+[data-theme="dark"] .schedule-day-item {
+  background: rgba(255, 255, 255, 0.055);
+  border-color: rgba(255, 220, 160, 0.1);
+}
+
+[data-theme="dark"] .day-column {
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(255, 220, 160, 0.11);
+}
+
+[data-theme="dark"] .day-head {
+  border-bottom-color: rgba(255, 220, 160, 0.12);
+}
+
+[data-theme="dark"] .day-load,
+[data-theme="dark"] .slot-btn,
+[data-theme="dark"] .reason-chip,
+[data-theme="dark"] .topic-tags span {
+  background: rgba(255, 255, 255, 0.065);
+}
+
+[data-theme="dark"] .empty-state {
+  border-color: rgba(255, 220, 160, 0.14);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+[data-theme="dark"] .dispose-action-hint {
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(255, 220, 160, 0.1);
+}
+
+[data-theme="dark"] .icon-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 220, 160, 0.1);
+  color: var(--text);
 }
 
 [data-theme="dark"] .topic-card:hover {
@@ -669,6 +712,21 @@ button:disabled {
   border: 1px solid rgba(36, 25, 13, 0.08);
 }
 
+.icon-btn {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(36, 25, 13, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: var(--text);
+  font-size: 22px;
+  line-height: 1;
+}
+
 .danger-btn {
   background: var(--danger);
   color: white;
@@ -1136,6 +1194,11 @@ button:disabled {
   gap: 8px;
 }
 
+.topic-actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
 .topic-priority,
 .topic-stage,
 .topic-sync,
@@ -1242,6 +1305,31 @@ button:disabled {
   background: var(--accent-soft);
   color: var(--accent);
   border-color: rgba(182, 82, 45, 0.22);
+}
+
+.dispose-action-hint {
+  display: grid;
+  gap: 6px;
+  margin-top: -4px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(36, 25, 13, 0.045);
+  border: 1px solid rgba(36, 25, 13, 0.08);
+}
+
+.dispose-action-hint strong {
+  font-size: 13px;
+}
+
+.dispose-action-hint span {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.dispose-action-hint.is-danger {
+  border-color: rgba(143, 29, 18, 0.18);
+  background: rgba(143, 29, 18, 0.055);
 }
 
 .topic-card[data-overdue="true"] .topic-stage {
@@ -1380,6 +1468,11 @@ button:disabled {
   gap: 14px;
 }
 
+.schedule-card {
+  width: min(640px, calc(100vw - 32px));
+  gap: 16px;
+}
+
 .daily-inbox-card {
   width: min(760px, calc(100vw - 32px));
   max-height: min(760px, calc(100vh - 48px));
@@ -1462,6 +1555,47 @@ button:disabled {
   margin: 0;
   line-height: 1.6;
   color: var(--text);
+}
+
+.import-result-card {
+  width: min(560px, calc(100vw - 32px));
+}
+
+.import-result-summary {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.import-result-list {
+  display: grid;
+  gap: 8px;
+}
+
+.import-result-item {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.76);
+  border: 1px solid rgba(36, 25, 13, 0.08);
+}
+
+.import-result-item strong {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.import-result-item span,
+.import-result-more {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.import-result-more {
+  padding: 0 4px;
 }
 
 .schedule-day-sidebar {
@@ -1556,6 +1690,15 @@ button:disabled {
   align-items: start;
 }
 
+.modal-head h3 {
+  margin: 2px 0 0;
+  line-height: 1.2;
+}
+
+.modal-close {
+  margin-top: -4px;
+}
+
 .time-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1577,6 +1720,11 @@ button:disabled {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+  flex-wrap: wrap;
+}
+
+.import-result-actions {
+  justify-content: space-between;
 }
 
 .app-toast {

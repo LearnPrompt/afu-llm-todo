@@ -16,6 +16,10 @@ const state = {
   settings: null,
   configPath: "",
   lark: null,
+  macosCalendars: [],
+  macosCalendarsLoaded: false,
+  macosCalendarsLoading: false,
+  macosCalendarsError: "",
   larkAuthFlow: null,
   weekOffset: 0,
   search: "",
@@ -31,10 +35,12 @@ const state = {
   workspaceView: "inbox",
   scheduleTarget: null,
   disposeTarget: null,
+  scheduleSubmitting: false,
   dailyInboxDialogShown: false,
   dailyInboxDate: "",
   dailyInboxPendingPaths: null,
   scheduleQueue: [],
+  importResultItems: [],
 };
 
 const elements = {
@@ -79,6 +85,7 @@ const elements = {
   copyLarkConfigBtn: document.querySelector("#copyLarkConfigBtn"),
   copyLarkAuthBtn: document.querySelector("#copyLarkAuthBtn"),
   plannerMacosCalendarName: document.querySelector("#plannerMacosCalendarName"),
+  plannerMacosCalendarStatus: document.querySelector("#plannerMacosCalendarStatus"),
   plannerSettingsHint: document.querySelector("#plannerSettingsHint"),
   settingsDiagBanner: document.querySelector("#settingsDiagBanner"),
   vaultRootLabel: document.querySelector("#vaultRootLabel"),
@@ -102,10 +109,12 @@ const elements = {
   scheduleSlotButtons: document.querySelector("#scheduleSlotButtons"),
   scheduleCalendarProvider: document.querySelector("#scheduleCalendarProvider"),
   scheduleCalendarHint: document.querySelector("#scheduleCalendarHint"),
+  scheduleSubmitBtn: document.querySelector("#scheduleSubmitBtn"),
   disposeDialog: document.querySelector("#disposeDialog"),
   disposeForm: document.querySelector("#disposeForm"),
   disposeTitle: document.querySelector("#disposeTitle"),
   disposeAction: document.querySelector("#disposeAction"),
+  disposeActionHint: document.querySelector("#disposeActionHint"),
   disposeReason: document.querySelector("#disposeReason"),
   disposeReasonChips: document.querySelector("#disposeReasonChips"),
   disposeSync: document.querySelector("#disposeSync"),
@@ -128,6 +137,12 @@ const elements = {
   larkAuthExpires: document.querySelector("#larkAuthExpires"),
   larkAuthCompleteBtn: document.querySelector("#larkAuthCompleteBtn"),
   copyLarkAuthCodeBtn: document.querySelector("#copyLarkAuthCodeBtn"),
+  importResultDialog: document.querySelector("#importResultDialog"),
+  importResultTitle: document.querySelector("#importResultTitle"),
+  importResultSummary: document.querySelector("#importResultSummary"),
+  importResultList: document.querySelector("#importResultList"),
+  importResultBacklogBtn: document.querySelector("#importResultBacklogBtn"),
+  importResultScheduleBtn: document.querySelector("#importResultScheduleBtn"),
   topicCardTemplate: document.querySelector("#topicCardTemplate"),
   appToast: document.querySelector("#appToast"),
   themeToggleBtn: document.querySelector("#themeToggleBtn"),
@@ -143,6 +158,9 @@ async function boot() {
   initTheme();
   bindEvents();
   await loadTopics();
+  if (state.settings?.calendarProvider === "macos") {
+    await loadMacOSCalendars();
+  }
 }
 
 function initTheme() {
@@ -248,6 +266,9 @@ function bindEvents() {
   elements.copyLarkConfigBtn?.addEventListener("click", () => copyTextFromButton(elements.copyLarkConfigBtn, "lark-cli config init --new"));
   elements.copyLarkAuthBtn?.addEventListener("click", () => copyTextFromButton(elements.copyLarkAuthBtn, "lark-cli auth login --domain calendar"));
   elements.plannerCalendarProvider?.addEventListener("change", () => {
+    if (elements.plannerCalendarProvider.value === "macos") {
+      loadMacOSCalendars();
+    }
     renderLarkSetupPanel();
     elements.plannerSettingsHint.textContent = getSettingsHint({
       ...(state.settings || {}),
@@ -267,6 +288,7 @@ function bindEvents() {
     );
   });
   elements.disposeForm.addEventListener("submit", submitDispose);
+  elements.disposeAction?.addEventListener("change", () => renderDisposeActionHint());
   elements.disposeReasonChips?.addEventListener("click", (event) => {
     const chip = event.target.closest(".reason-chip");
     if (!chip) return;
@@ -277,6 +299,8 @@ function bindEvents() {
   });
   elements.larkAuthCompleteBtn.addEventListener("click", () => finishLarkRepairFlow());
   elements.copyLarkAuthCodeBtn.addEventListener("click", () => copyLarkAuthCode());
+  elements.importResultBacklogBtn?.addEventListener("click", () => keepImportedCardsInBacklog());
+  elements.importResultScheduleBtn?.addEventListener("click", () => scheduleImportedCardsNow());
 
   document.querySelectorAll("[data-close]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -311,6 +335,29 @@ async function loadTopics() {
     alert(error.message);
   } finally {
     setBusy(false);
+  }
+}
+
+async function loadMacOSCalendars() {
+  if (state.macosCalendarsLoading) return;
+  state.macosCalendarsLoading = true;
+  state.macosCalendarsError = "";
+  renderMacOSCalendarSelect();
+  try {
+    const response = await fetch("/api/macos/calendars");
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "读取 macOS 日历失败");
+    }
+    state.macosCalendars = (payload.writableCalendars || payload.calendars || [])
+      .filter((calendar) => calendar?.writable !== false && calendar?.name)
+      .map((calendar) => ({ name: calendar.name }));
+    state.macosCalendarsLoaded = true;
+  } catch (error) {
+    state.macosCalendarsError = error.message || "读取 macOS 日历失败";
+  } finally {
+    state.macosCalendarsLoading = false;
+    renderMacOSCalendarSelect();
   }
 }
 
@@ -422,9 +469,75 @@ function renderPlannerSettings() {
   elements.plannerInboxDir.value = state.settings.inboxDir || '';
   elements.plannerArchiveDir.value = state.settings.archiveDir || '';
   elements.plannerCalendarProvider.value = state.settings.calendarProvider || 'none';
-  elements.plannerMacosCalendarName.value = state.settings.macosCalendarName || '';
+  renderMacOSCalendarSelect();
   elements.plannerSettingsHint.textContent = getSettingsHint(state.settings);
   renderLarkSetupPanel();
+}
+
+function renderMacOSCalendarSelect() {
+  const select = elements.plannerMacosCalendarName;
+  if (!select) return;
+
+  const selectedName = state.settings?.macosCalendarName || select.value || "";
+  select.innerHTML = "";
+
+  const provider = elements.plannerCalendarProvider?.value || state.settings?.calendarProvider || "none";
+  if (provider !== "macos") {
+    select.append(new Option("选择同步到 macOS 后自动读取", ""));
+    select.disabled = true;
+    if (elements.plannerMacosCalendarStatus) {
+      elements.plannerMacosCalendarStatus.textContent = "只显示 Calendar.app 里可写入的日历。";
+    }
+    return;
+  }
+
+  select.disabled = state.macosCalendarsLoading;
+  if (state.macosCalendarsLoading) {
+    select.append(new Option("正在读取 Calendar.app…", selectedName));
+    select.value = selectedName;
+    if (elements.plannerMacosCalendarStatus) {
+      elements.plannerMacosCalendarStatus.textContent = "正在向 macOS 请求可写日历列表。";
+    }
+    return;
+  }
+
+  if (state.macosCalendarsError) {
+    select.append(new Option(selectedName ? `保留当前：${selectedName}` : "读取失败，请检查系统日历权限", selectedName));
+    select.value = selectedName;
+    if (elements.plannerMacosCalendarStatus) {
+      elements.plannerMacosCalendarStatus.textContent = `读取失败：${state.macosCalendarsError}`;
+    }
+    return;
+  }
+
+  if (!state.macosCalendarsLoaded) {
+    select.append(new Option("点击同步目标后自动读取", selectedName));
+    select.value = selectedName;
+    if (elements.plannerMacosCalendarStatus) {
+      elements.plannerMacosCalendarStatus.textContent = "只显示 Calendar.app 里可写入的日历。";
+    }
+    return;
+  }
+
+  if (!state.macosCalendars.length) {
+    select.append(new Option("没有找到可写日历", ""));
+    select.value = "";
+    if (elements.plannerMacosCalendarStatus) {
+      elements.plannerMacosCalendarStatus.textContent = "Calendar.app 没有返回可写日历，请先新建一个本地/iCloud 日历。";
+    }
+    return;
+  }
+
+  for (const calendar of state.macosCalendars) {
+    select.append(new Option(calendar.name, calendar.name));
+  }
+  if (selectedName && !state.macosCalendars.some((calendar) => calendar.name === selectedName)) {
+    select.prepend(new Option(`当前配置：${selectedName}`, selectedName));
+  }
+  select.value = selectedName || state.macosCalendars[0].name;
+  if (elements.plannerMacosCalendarStatus) {
+    elements.plannerMacosCalendarStatus.textContent = `已读取 ${state.macosCalendars.length} 个可写日历。`;
+  }
 }
 
 function renderBacklog() {
@@ -747,6 +860,7 @@ function createTopicCard(topic, options = {}) {
 
   const scheduleBtn = fragment.querySelector('[data-action="schedule"]');
   const unscheduleBtn = fragment.querySelector('[data-action="unschedule"]');
+  const revertImportBtn = fragment.querySelector('[data-action="revert-import"]');
   const disposeBtn = fragment.querySelector('[data-action="dispose"]');
 
   if (topic.scheduledDate) {
@@ -754,6 +868,11 @@ function createTopicCard(topic, options = {}) {
   }
 
   scheduleBtn.addEventListener("click", () => openScheduleDialog(topic, topic.scheduledDate || getCurrentWeekDays()[0].iso));
+  if (topic.sourceInboxPath) {
+    revertImportBtn.addEventListener("click", () => handleRevertImportedTopic(topic));
+  } else {
+    revertImportBtn.remove();
+  }
   disposeBtn.addEventListener("click", () => openDisposeDialog(topic));
 
   if (options.calendar) {
@@ -883,6 +1002,7 @@ function bindDropZone(column, dateIso) {
 
 function openScheduleDialog(topic, dateIso) {
   state.scheduleTarget = topic;
+  setScheduleSubmitting(false);
   elements.scheduleTitle.textContent = `排期：${stripTopicPrefix(topic.title)}`;
   elements.scheduleDate.value = dateIso;
   elements.scheduleStart.value = topic.scheduledStart || "10:00";
@@ -937,7 +1057,7 @@ function clearActiveScheduleSlot() {
 
 async function submitSchedule(event) {
   event.preventDefault();
-  if (!state.scheduleTarget) return;
+  if (!state.scheduleTarget || state.scheduleSubmitting) return;
 
   const payload = {
     path: state.scheduleTarget.path,
@@ -947,11 +1067,22 @@ async function submitSchedule(event) {
     calendarProvider: elements.scheduleCalendarProvider.value,
   };
 
-  await postAndReload("/api/topics/schedule", payload);
+  setScheduleSubmitting(true);
+  const data = await postAndReload("/api/topics/schedule", payload);
+  setScheduleSubmitting(false);
+  if (!data) return;
+  showToast(getScheduleResultMessage(data.topic, payload.calendarProvider));
   elements.scheduleDialog.close();
   if (state.scheduleQueue.length) {
     advanceScheduleQueue();
   }
+}
+
+function setScheduleSubmitting(isSubmitting) {
+  state.scheduleSubmitting = Boolean(isSubmitting);
+  if (!elements.scheduleSubmitBtn) return;
+  elements.scheduleSubmitBtn.disabled = state.scheduleSubmitting;
+  elements.scheduleSubmitBtn.textContent = state.scheduleSubmitting ? "保存中…" : "保存排期";
 }
 
 function openDisposeDialog(topic) {
@@ -962,7 +1093,29 @@ function openDisposeDialog(topic) {
   elements.disposeReasonChips?.querySelectorAll(".reason-chip").forEach((btn) => btn.classList.remove("is-active"));
   elements.disposeSync.checked = Boolean(topic.larkEventId || topic.macosEventId);
   elements.disposeSync.disabled = !(topic.larkEventId || topic.macosEventId);
+  renderDisposeActionHint();
   elements.disposeDialog.showModal();
+}
+
+function renderDisposeActionHint() {
+  if (!elements.disposeActionHint) return;
+  const action = elements.disposeAction?.value || "拒绝";
+  const topic = state.disposeTarget;
+  const hasInboxSource = Boolean(topic?.sourceInboxPath);
+  if (action === "拒绝") {
+    elements.disposeActionHint.className = "dispose-action-hint";
+    elements.disposeActionHint.innerHTML = `
+      <strong>会保留在 Vault 里</strong>
+      <span>行动卡片仍在「${escapeHtml(state.settings?.topicDir || "行动卡片目录")}」，只是标记为已拒绝，并从排期池/周历隐藏。原始收件箱素材不删除。</span>
+    `;
+    return;
+  }
+
+  elements.disposeActionHint.className = "dispose-action-hint is-danger";
+  elements.disposeActionHint.innerHTML = `
+    <strong>会从活动区移走</strong>
+    <span>行动卡片会移动到「${escapeHtml(state.settings?.archiveDir || "归档目录")}」。${hasInboxSource ? `关联的原始收件箱素材「${escapeHtml(topic.sourceInboxPath)}」也会从 Vault 删除。` : "这张卡没有关联原始收件箱素材，因此只移动行动卡片。"}这不是移到系统废纸篓。</span>
+  `;
 }
 
 async function submitDispose(event) {
@@ -975,23 +1128,45 @@ async function submitDispose(event) {
     return;
   }
 
-  await postAndReload("/api/topics/disposition", {
+  const data = await postAndReload("/api/topics/disposition", {
     path: state.disposeTarget.path,
     action: elements.disposeAction.value,
     reason,
     removeFromCalendar: elements.disposeSync.checked,
   });
+  if (!data) return;
   elements.disposeDialog.close();
 }
 
 async function handleUnschedule(topic) {
-  const confirmed = window.confirm("把这个选题移回待排期池？默认保留已同步的外部日程。");
+  const hasExternalEvent = Boolean(topic.larkEventId || topic.macosEventId);
+  const confirmed = window.confirm(
+    hasExternalEvent
+      ? "把这个选题移回待排期池，并删除已经同步的外部日程？"
+      : "把这个选题移回待排期池？",
+  );
   if (!confirmed) return;
 
-  await postAndReload("/api/topics/unschedule", {
+  const data = await postAndReload("/api/topics/unschedule", {
     path: topic.path,
-    removeFromCalendar: false,
+    removeFromCalendar: hasExternalEvent,
   });
+  if (data) {
+    showToast(hasExternalEvent ? "已撤回排期，并删除对应日历事件。" : "已撤回排期。");
+  }
+}
+
+async function handleRevertImportedTopic(topic) {
+  const source = topic.sourceInboxPath || "原收件箱素材";
+  const confirmed = window.confirm(`撤回这张卡，并让「${source}」重新回到收件箱候选？\n\n这会删除当前行动卡，但不会删除原始收件箱素材。`);
+  if (!confirmed) return;
+
+  const data = await postAndReload("/api/topics/revert-import", {
+    path: topic.path,
+  });
+  if (data) {
+    showToast("已撤回转卡，原素材会重新出现在候选里。");
+  }
 }
 
 async function startLarkRepairFlow() {
@@ -1231,13 +1406,14 @@ async function importInboxCandidate(candidate) {
     clearBacklogFilters();
     state.selectedInboxPaths.delete(candidate.sourcePath);
     await loadTopics();
-    state.workspaceView = "backlog";
-    setWorkspaceView("backlog");
-    if (data.merged) {
-      showTopicToast(`已合并到「${stripTopicPrefix(data.mergedTitle)}」`, state.lastCreatedTopic);
-    }
-    state.scheduleQueue = [{ path: topicPath, title: importedTitle }];
-    advanceScheduleQueue();
+    state.workspaceView = "inbox";
+    renderWorkspaceView();
+    showImportResultDialog([{ path: topicPath, title: importedTitle }], {
+      merged: Boolean(data.merged),
+      message: data.merged
+        ? `已合并到「${stripTopicPrefix(data.mergedTitle)}」，可以现在排期，也可以先回到排期池。`
+        : "新卡片已经放入排期池。你可以继续处理收件箱，也可以现在安排到日历。",
+    });
   } catch (error) {
     alert(error.message);
   } finally {
@@ -1278,16 +1454,23 @@ async function importSelectedInboxCandidates(sourcePaths = Array.from(state.sele
     clearBacklogFilters();
 
     await loadTopics();
-    state.workspaceView = "backlog";
-    setWorkspaceView("backlog");
+    state.workspaceView = "inbox";
+    renderWorkspaceView();
     const failedCount = (data.failed || []).length;
     const message = failedCount
       ? `已转入排期池 ${data.created.length} 条，失败 ${failedCount} 条。`
       : `已转入排期池 ${data.created.length} 条。`;
 
     if ((data.created || []).length) {
-      state.scheduleQueue = (data.created || []).map((item) => ({ path: item.path, title: item.title }));
-      advanceScheduleQueue();
+      showImportResultDialog((data.created || []).map((item) => ({
+        path: item.path,
+        title: stripTopicPrefix(item.title || ""),
+      })), {
+        failedCount,
+        message: failedCount
+          ? `${message} 可以先处理成功的卡片，失败项稍后再看。`
+          : `${message} 你可以继续处理收件箱，也可以现在逐条排期。`,
+      });
     } else {
       showTopicToast(message, state.lastCreatedTopic);
     }
@@ -1296,6 +1479,59 @@ async function importSelectedInboxCandidates(sourcePaths = Array.from(state.sele
   } finally {
     setBusy(false);
   }
+}
+
+function showImportResultDialog(items, options = {}) {
+  const cleanItems = (items || []).filter((item) => item?.path || item?.title);
+  state.importResultItems = cleanItems;
+  if (!elements.importResultDialog) {
+    state.scheduleQueue = cleanItems;
+    advanceScheduleQueue();
+    return;
+  }
+
+  const count = cleanItems.length;
+  elements.importResultTitle.textContent = count > 1 ? `已转入 ${count} 张卡` : "已转入 1 张卡";
+  elements.importResultSummary.textContent = options.message || "新卡片已经放入排期池。";
+  elements.importResultList.innerHTML = "";
+
+  for (const item of cleanItems.slice(0, 5)) {
+    const row = document.createElement("div");
+    row.className = "import-result-item";
+    const title = document.createElement("strong");
+    title.textContent = stripTopicPrefix(item.title || "未命名卡片");
+    const meta = document.createElement("span");
+    meta.textContent = item.path || "已写入本地 Markdown";
+    row.append(title, meta);
+    elements.importResultList.append(row);
+  }
+
+  if (cleanItems.length > 5) {
+    const more = document.createElement("div");
+    more.className = "import-result-more";
+    more.textContent = `还有 ${cleanItems.length - 5} 张已放入排期池`;
+    elements.importResultList.append(more);
+  }
+
+  elements.importResultScheduleBtn.textContent = count > 1 ? "逐条排期" : "现在排期";
+  elements.importResultScheduleBtn.disabled = count === 0;
+  elements.importResultDialog.showModal();
+}
+
+function keepImportedCardsInBacklog() {
+  elements.importResultDialog?.close();
+  state.workspaceView = "backlog";
+  setWorkspaceView("backlog");
+  showToast("已放入排期池，确认后再拖进日历。");
+}
+
+function scheduleImportedCardsNow() {
+  const items = state.importResultItems.slice();
+  elements.importResultDialog?.close();
+  state.workspaceView = "backlog";
+  setWorkspaceView("backlog");
+  state.scheduleQueue = items;
+  advanceScheduleQueue();
 }
 
 function advanceScheduleQueue() {
@@ -1498,13 +1734,13 @@ function applyWorkspaceMode(mode) {
     elements.vaultRootLabel.hidden = isStandalone;
   }
   if (elements.plannerTopicDir) {
-    elements.plannerTopicDir.placeholder = isStandalone ? '/Users/you/选题库' : '15_自媒体/选题库';
+    elements.plannerTopicDir.placeholder = isStandalone ? '/Users/you/行动卡片' : '40_行动卡片';
   }
   if (elements.plannerInboxDir) {
     elements.plannerInboxDir.placeholder = isStandalone ? '/Users/you/收件箱' : '00_收件箱';
   }
   if (elements.plannerArchiveDir) {
-    elements.plannerArchiveDir.placeholder = isStandalone ? '/Users/you/归档' : '99_系统/归档/选题占位';
+    elements.plannerArchiveDir.placeholder = isStandalone ? '/Users/you/归档' : '99_系统/归档/行动卡片';
   }
   if (elements.plannerSettingsHint) {
     elements.plannerSettingsHint.textContent = isStandalone
@@ -1603,7 +1839,7 @@ function getSettingsHint(settings) {
   if (settings.calendarProvider === 'macos') {
     return settings.macosCalendarName
       ? `排期时会写入 macOS 日历「${settings.macosCalendarName}」。`
-      : '排期时会写入 macOS 的第一个本地日历。';
+      : '排期时会写入 macOS 的第一个可写日历；建议填写 Home 或 Work 这类明确日历名。';
   }
   return '排期只回写 Markdown，适合先试用或不需要外部日历的场景。';
 }
@@ -1617,9 +1853,28 @@ function getCalendarHint(provider, lark, settings) {
   if (provider === 'macos') {
     return settings?.macosCalendarName
       ? `会写入 macOS 日历「${settings.macosCalendarName}」，首次使用可能弹出系统授权。`
-      : '会写入 macOS 的第一个本地日历，首次使用可能弹出系统授权。';
+      : '会写入 macOS 的第一个可写日历，首次使用可能弹出系统授权；建议先填明确日历名。';
   }
   return '只写入 Obsidian 选题卡，不创建外部日程。';
+}
+
+function getScheduleResultMessage(topic, requestedProvider) {
+  const status = topic?.calendarSyncStatus || "";
+  const provider = topic?.calendarProvider || requestedProvider || "none";
+  if (provider === "none") {
+    return "排期已保存到 Markdown。";
+  }
+  if (status.startsWith("同步失败")) {
+    return `排期已保存，但外部日历同步失败：${status.replace(/^同步失败：?/, "") || "请检查日历权限"}`;
+  }
+  if (provider === "macos") {
+    const calendarName = topic?.macosCalendarName || state.settings?.macosCalendarName || "macOS 日历";
+    return `排期已保存，并同步到 macOS「${calendarName}」。`;
+  }
+  if (provider === "lark") {
+    return "排期已保存，并同步到飞书日历。";
+  }
+  return "排期已保存。";
 }
 
 function getDailyCapacity() {
@@ -1662,13 +1917,21 @@ async function postAndReload(url, payload) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const data = await response.json();
+    const contentType = response.headers.get("content-type") || "";
+    const data = contentType.includes("application/json")
+      ? await response.json()
+      : { error: await response.text() };
     if (!response.ok) {
-      throw new Error(data.error || "操作失败");
+      const fallback = response.status === 404
+        ? "接口不存在。请重启 npm run dev 后刷新页面。"
+        : "操作失败";
+      throw new Error(data.error || fallback);
     }
     await loadTopics();
+    return data;
   } catch (error) {
     alert(error.message);
+    return null;
   } finally {
     setBusy(false);
   }

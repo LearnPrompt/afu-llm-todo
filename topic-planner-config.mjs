@@ -3,12 +3,12 @@ import { promises as fs } from 'node:fs';
 
 const CONFIG_FILENAME = 'topic-planner.config.json';
 const DEFAULT_DIRS = {
-  topicDir: '15_自媒体/选题库',
+  topicDir: '40_行动卡片',
   inboxDir: '00_收件箱',
-  archiveDir: '99_系统/归档/选题占位',
-  wikiDir: '30_研究/内容Wiki',
-  wikiIndexPath: '30_研究/内容Wiki/index.md',
-  wikiLogPath: '30_研究/内容Wiki/log.md',
+  archiveDir: '99_系统/归档/行动卡片',
+  wikiDir: '30_整理Wiki',
+  wikiIndexPath: '30_整理Wiki/index.md',
+  wikiLogPath: '30_整理Wiki/log.md',
 };
 
 const DEFAULT_CALENDAR = {

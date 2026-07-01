@@ -11,15 +11,15 @@ import {
 test('createDefaultPlannerSettings exposes editable relative directories for first-run setup', () => {
   const settings = createDefaultPlannerSettings();
 
-  assert.equal(settings.topicDir, '15_自媒体/选题库');
+  assert.equal(settings.topicDir, '40_行动卡片');
   assert.equal(settings.inboxDir, '00_收件箱');
-  assert.equal(settings.archiveDir, '99_系统/归档/选题占位');
+  assert.equal(settings.archiveDir, '99_系统/归档/行动卡片');
   assert.equal(settings.calendarProvider, 'none');
   assert.equal(settings.macosCalendarName, '');
   assert.equal(settings.wikiMode, 'off');
-  assert.equal(settings.wikiDir, '30_研究/内容Wiki');
-  assert.equal(settings.wikiIndexPath, '30_研究/内容Wiki/index.md');
-  assert.equal(settings.wikiLogPath, '30_研究/内容Wiki/log.md');
+  assert.equal(settings.wikiDir, '30_整理Wiki');
+  assert.equal(settings.wikiIndexPath, '30_整理Wiki/index.md');
+  assert.equal(settings.wikiLogPath, '30_整理Wiki/log.md');
   assert.equal(settings.dailyCapacity, 2);
   assert.deepEqual(settings.scheduleTimeSlots, [
     { label: '上午深度', start: '09:30', end: '11:00' },
@@ -92,7 +92,7 @@ test('resolvePlannerPaths joins vault root with configured directories', () => {
   assert.equal(resolved.topicDir, path.join('/Users/demo/My Vault', '内容/选题库'));
   assert.equal(resolved.inboxDir, path.join('/Users/demo/My Vault', '00_收件箱'));
   assert.equal(resolved.archiveRoot, path.join('/Users/demo/My Vault', '99_系统/归档/选题占位'));
-  assert.equal(resolved.wikiRoot, path.join('/Users/demo/My Vault', '30_研究/内容Wiki'));
-  assert.equal(resolved.wikiIndexPath, path.join('/Users/demo/My Vault', '30_研究/内容Wiki/index.md'));
-  assert.equal(resolved.wikiLogPath, path.join('/Users/demo/My Vault', '30_研究/内容Wiki/log.md'));
+  assert.equal(resolved.wikiRoot, path.join('/Users/demo/My Vault', '30_整理Wiki'));
+  assert.equal(resolved.wikiIndexPath, path.join('/Users/demo/My Vault', '30_整理Wiki/index.md'));
+  assert.equal(resolved.wikiLogPath, path.join('/Users/demo/My Vault', '30_整理Wiki/log.md'));
 });

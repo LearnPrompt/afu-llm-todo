@@ -11,6 +11,8 @@
 [![Release](https://img.shields.io/github/v/release/LearnPrompt/afu-llm-todo)](https://github.com/LearnPrompt/afu-llm-todo/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+> **当前状态与测试入口：** [v1.3.4 能力分析、已知风险、完整测试计划与记录方法](docs/current-status-and-test-plan-v1.3.4.md)
+
 ![Afu hero](docs/assets/afu-hero.png)
 
 ## 演示视频

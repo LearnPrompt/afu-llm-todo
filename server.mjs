@@ -69,6 +69,7 @@ let authCache = { expiresAt: 0, value: null };
 let calendarCache = { expiresAt: 0, value: null };
 let authFlowCache = { expiresAt: 0, value: null };
 let plannerSettingsCache = null;
+const topicMutationLocks = new Map();
 
 createServer(async (req, res) => {
   try {
@@ -127,17 +128,22 @@ createServer(async (req, res) => {
 
     if (url.pathname === "/api/topics/schedule" && req.method === "POST") {
       const body = await readJsonBody(req);
-      return respondJson(res, await scheduleTopic(body));
+      return respondJson(res, await withTopicMutationLock(body.path, () => scheduleTopic(body)));
     }
 
     if (url.pathname === "/api/topics/disposition" && req.method === "POST") {
       const body = await readJsonBody(req);
-      return respondJson(res, await disposeTopic(body));
+      return respondJson(res, await withTopicMutationLock(body.path, () => disposeTopic(body)));
+    }
+
+    if (url.pathname === "/api/topics/revert-import" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      return respondJson(res, await withTopicMutationLock(body.path, () => revertImportedTopic(body)));
     }
 
     if (url.pathname === "/api/topics/unschedule" && req.method === "POST") {
       const body = await readJsonBody(req);
-      return respondJson(res, await unscheduleTopic(body));
+      return respondJson(res, await withTopicMutationLock(body.path, () => unscheduleTopic(body)));
     }
 
     if (url.pathname === "/api/lark/repair/start" && req.method === "POST") {
@@ -146,6 +152,10 @@ createServer(async (req, res) => {
 
     if (url.pathname === "/api/lark/repair/finish" && req.method === "POST") {
       return respondJson(res, await finishLarkAuthRepair());
+    }
+
+    if (url.pathname === "/api/macos/calendars" && req.method === "GET") {
+      return respondJson(res, await getMacOSCalendarsPayload());
     }
 
     if (url.pathname === "/api/health" && req.method === "GET") {
@@ -176,6 +186,20 @@ async function buildTopicsPayload() {
     inboxCandidates: inboxAnalysis.candidates,
     inboxSummary: inboxAnalysis.summary,
   };
+}
+
+async function withTopicMutationLock(topicPath, operation) {
+  const key = optionalString(topicPath) || "__unknown_topic__";
+  const previous = topicMutationLocks.get(key) || Promise.resolve();
+  const current = previous.catch(() => {}).then(operation);
+  topicMutationLocks.set(key, current);
+  try {
+    return await current;
+  } finally {
+    if (topicMutationLocks.get(key) === current) {
+      topicMutationLocks.delete(key);
+    }
+  }
 }
 
 async function buildInboxCandidatesPayload() {
@@ -330,7 +354,13 @@ function resetRuntimeCaches() {
 
 async function listTopics() {
   const { topicDir } = await getPlannerPaths();
-  const entries = await fs.readdir(topicDir, { withFileTypes: true });
+  let entries = [];
+  try {
+    entries = await fs.readdir(topicDir, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
   const files = entries
     .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
     .filter((entry) => !["README.md", "00-AI工具选题索引.md"].includes(entry.name))
@@ -663,7 +693,13 @@ function normalizeIncomingTodo(todo) {
 
 async function listMarkdownFiles(rootDir) {
   const results = [];
-  const entries = await fs.readdir(rootDir, { withFileTypes: true });
+  let entries = [];
+  try {
+    entries = await fs.readdir(rootDir, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
   for (const entry of entries) {
     if (["attachments", "images"].includes(entry.name)) continue;
     const absolute = path.join(rootDir, entry.name);
@@ -777,22 +813,36 @@ async function scheduleTopic(payload) {
   topic.drop_reason = "";
 
   const calendarProvider = normalizeCalendarProvider(payload.calendarProvider || (payload.syncToLark ? "lark" : "none"));
-  await deleteCalendarEventsExcept(topic, calendarProvider);
 
   if (calendarProvider !== "none") {
-    const syncResult = await syncTopicToCalendar({
-      title,
-      topic,
-      path: source.relPath,
-      provider: calendarProvider,
-    });
-    topic.calendar_provider = syncResult.provider;
-    topic.calendar_sync_status = syncResult.syncStatus;
-    topic.lark_event_id = syncResult.eventId || "";
-    topic.lark_calendar_id = syncResult.calendarId || "";
-    topic.macos_event_id = syncResult.macosEventId || "";
-    topic.macos_calendar_name = syncResult.macosCalendarName || "";
+    try {
+      await deleteCalendarEventsExcept(topic, calendarProvider);
+      const syncResult = await syncTopicToCalendar({
+        title,
+        topic,
+        path: source.relPath,
+        provider: calendarProvider,
+      });
+      topic.calendar_provider = syncResult.provider;
+      topic.calendar_sync_status = syncResult.syncStatus;
+      topic.lark_event_id = syncResult.eventId || "";
+      topic.lark_calendar_id = syncResult.calendarId || "";
+      topic.macos_event_id = syncResult.macosEventId || "";
+      topic.macos_calendar_name = syncResult.macosCalendarName || "";
+    } catch (error) {
+      topic.calendar_provider = calendarProvider;
+      topic.calendar_sync_status = `同步失败：${formatCalendarSyncError(error)}`;
+      topic.lark_event_id = "";
+      topic.lark_calendar_id = "";
+      topic.macos_event_id = "";
+      topic.macos_calendar_name = "";
+    }
   } else {
+    try {
+      await deleteCalendarEventsExcept(topic, calendarProvider);
+    } catch (error) {
+      console.warn("Failed to clean external calendar event while scheduling Markdown-only:", error);
+    }
     topic.calendar_provider = "none";
     topic.calendar_sync_status = "未同步";
     topic.lark_event_id = "";
@@ -807,6 +857,7 @@ async function scheduleTopic(payload) {
     date,
     time: `${startTime}-${endTime}`,
     calendarProvider,
+    calendarSyncStatus: topic.calendar_sync_status,
   });
   return { ok: true, topic: await readTopic(filePath) };
 }
@@ -901,6 +952,34 @@ async function disposeTopic(payload) {
     ok: true,
     archived: true,
     archivePath: path.relative((await getPlannerPaths()).vaultRoot, archivePath),
+  };
+}
+
+async function revertImportedTopic(payload) {
+  const filePath = await resolveTopicPath(payload.path);
+  const source = await loadTopicSource(filePath);
+  const title = extractTitle(source.body, path.basename(filePath, ".md"));
+  const topic = normalizeTopic(source.frontmatter, title, source.relPath);
+  const sourceInboxPath = topic.source_inbox_path;
+
+  if (!sourceInboxPath) {
+    throw badRequest("这张卡没有关联收件箱来源，不能撤回到候选。");
+  }
+
+  if (topic.lark_event_id || topic.macos_event_id) {
+    await deleteSyncedCalendarEvent(topic);
+  }
+
+  await fs.unlink(filePath);
+  await appendPlannerLog("topic-revert-import", title, {
+    path: source.relPath,
+    source: sourceInboxPath,
+  });
+
+  return {
+    ok: true,
+    reverted: true,
+    sourceInboxPath,
   };
 }
 
@@ -1313,6 +1392,7 @@ async function syncTopicToMacOSCalendar({ title, topic, path: topicPath }) {
   if (topic.macos_event_id) {
     await deleteMacOSCalendarEvent(topic.macos_event_id);
   }
+  await deleteMacOSCalendarEventsForTopic(topic.topic_id);
 
   const description = [
     "由 Topic Planner 自动同步",
@@ -1322,18 +1402,20 @@ async function syncTopicToMacOSCalendar({ title, topic, path: topicPath }) {
   const eventUid = await createMacOSCalendarEvent({
     title,
     description,
-    startMs: toEpochMilliseconds(topic.scheduled_date, topic.scheduled_start),
-    endMs: toEpochMilliseconds(topic.scheduled_date, topic.scheduled_end),
+    date: topic.scheduled_date,
+    startTime: topic.scheduled_start,
+    endTime: topic.scheduled_end,
     calendarName: settings.macosCalendarName,
   });
+  const [uid, actualCalendarName] = eventUid.split("\t");
 
   return {
     provider: "macos",
-    syncStatus: eventUid ? "已同步" : "同步失败",
+    syncStatus: uid ? "已同步" : "同步失败",
     eventId: "",
     calendarId: "",
-    macosEventId: eventUid,
-    macosCalendarName: settings.macosCalendarName || "默认日历",
+    macosEventId: uid,
+    macosCalendarName: actualCalendarName || settings.macosCalendarName || "默认可写日历",
   };
 }
 
@@ -1378,53 +1460,146 @@ async function deleteCalendarEventsExcept(topic, provider) {
   }
 }
 
-async function createMacOSCalendarEvent({ title, description, startMs, endMs, calendarName }) {
+async function createMacOSCalendarEvent({ title, description, date, startTime, endTime, calendarName }) {
+  const startDateScript = buildAppleScriptDate("startDate", date, startTime);
+  const endDateScript = buildAppleScriptDate("endDate", date, endTime);
   const script = `
-(() => {
-const Calendar = Application('Calendar');
-Calendar.includeStandardAdditions = true;
-const title = ${JSON.stringify(title)};
-const description = ${JSON.stringify(description)};
-const preferredName = ${JSON.stringify(calendarName || "")};
-const startDate = new Date(${JSON.stringify(startMs)});
-const endDate = new Date(${JSON.stringify(endMs)});
-const calendars = Calendar.calendars();
-let target = null;
-if (preferredName) {
-  target = calendars.find((calendar) => calendar.name() === preferredName);
-}
-if (!target) {
-  target = calendars[0];
-}
-if (!target) {
-  throw new Error('macOS 日历里没有可用日历');
-}
-const event = Calendar.Event({ summary: title, startDate, endDate, description });
-target.events.push(event);
-return event.uid();
-})();
+tell application id "com.apple.iCal"
+  set preferredName to ${toAppleScriptString(calendarName || "")}
+  set targetCalendar to missing value
+  if preferredName is not "" then
+    repeat with candidateCalendar in calendars
+      if name of candidateCalendar is preferredName then
+        set targetCalendar to candidateCalendar
+        exit repeat
+      end if
+    end repeat
+    if targetCalendar is missing value then error "找不到 macOS 日历「" & preferredName & "」"
+  else
+    repeat with candidateCalendar in calendars
+      if writable of candidateCalendar is true then
+        set targetCalendar to candidateCalendar
+        exit repeat
+      end if
+    end repeat
+    if targetCalendar is missing value then error "macOS 日历里没有可写日历"
+  end if
+  if writable of targetCalendar is false then error "macOS 日历「" & (name of targetCalendar) & "」是只读日历"
+
+${startDateScript}
+${endDateScript}
+  set createdEvent to make new event at end of events of targetCalendar with properties {summary:${toAppleScriptString(title)}, start date:startDate, end date:endDate, description:${toAppleScriptString(description)}}
+  return (uid of createdEvent) & tab & (name of targetCalendar)
+end tell
 `;
-  return optionalString(await execText("osascript", ["-l", "JavaScript", "-e", script], { timeoutMs: 60_000 }));
+  return optionalString(await execText("osascript", ["-e", script], { timeoutMs: 60_000 }));
 }
 
 async function deleteMacOSCalendarEvent(eventUid) {
   if (!eventUid) return;
   const script = `
-(() => {
-const Calendar = Application('Calendar');
-const uid = ${JSON.stringify(eventUid)};
-const calendars = Calendar.calendars();
-for (const calendar of calendars) {
-  const matches = calendar.events.whose({ uid })();
-  if (matches.length > 0) {
-    matches[0].delete();
-    return 'deleted';
-  }
-}
-return 'missing';
-})();
+tell application id "com.apple.iCal"
+  set targetUid to ${toAppleScriptString(eventUid)}
+  repeat with candidateCalendar in calendars
+    set matchingEvents to every event of candidateCalendar whose uid is targetUid
+    if (count of matchingEvents) > 0 then
+      delete item 1 of matchingEvents
+      return "deleted"
+    end if
+  end repeat
+  return "missing"
+end tell
 `;
-  await execText("osascript", ["-l", "JavaScript", "-e", script], { timeoutMs: 60_000 });
+  await execText("osascript", ["-e", script], { timeoutMs: 60_000 });
+}
+
+async function deleteMacOSCalendarEventsForTopic(topicId) {
+  const normalizedTopicId = optionalString(topicId);
+  if (!normalizedTopicId) return;
+  const script = `
+tell application id "com.apple.iCal"
+  set targetNeedle to "topic_id: " & ${toAppleScriptString(normalizedTopicId)}
+  set deletedCount to 0
+  repeat with candidateCalendar in calendars
+    set matchingEvents to every event of candidateCalendar whose description contains targetNeedle
+    repeat with candidateEvent in matchingEvents
+      delete candidateEvent
+      set deletedCount to deletedCount + 1
+    end repeat
+  end repeat
+  return deletedCount as string
+end tell
+`;
+  await execText("osascript", ["-e", script], { timeoutMs: 60_000 });
+}
+
+async function getMacOSCalendarsPayload() {
+  const calendars = await listMacOSCalendars();
+  return {
+    ok: true,
+    calendars,
+    writableCalendars: calendars.filter((calendar) => calendar.writable),
+  };
+}
+
+async function listMacOSCalendars() {
+  const script = `
+tell application id "com.apple.iCal"
+  set calendarLines to ""
+  repeat with candidateCalendar in calendars
+    set calendarLines to calendarLines & (name of candidateCalendar) & tab & ((writable of candidateCalendar) as string) & linefeed
+  end repeat
+  return calendarLines
+end tell
+`;
+  const output = await execText("osascript", ["-e", script], { timeoutMs: 30_000 });
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [name, writableText = "false"] = line.split("\t");
+      return {
+        name: optionalString(name),
+        writable: writableText === "true",
+      };
+    })
+    .filter((calendar) => calendar.name);
+}
+
+function buildAppleScriptDate(variableName, date, time) {
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  const monthName = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ][month - 1];
+  const secondsFromMidnight = hour * 3600 + minute * 60;
+  return [
+    `  set ${variableName} to current date`,
+    `  set day of ${variableName} to 1`,
+    `  set year of ${variableName} to ${year}`,
+    `  set month of ${variableName} to ${monthName}`,
+    `  set day of ${variableName} to ${day}`,
+    `  set time of ${variableName} to ${secondsFromMidnight}`,
+  ].join("\n");
+}
+
+function toAppleScriptString(value) {
+  return `"${String(value ?? "")
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\r\n|\r|\n/g, '" & linefeed & "')}"`;
 }
 
 async function startLarkAuthRepair() {
@@ -1768,11 +1943,6 @@ function normalizeTimeString(value) {
 function toEpochSeconds(date, time) {
   const iso = `${date}T${time}:00+08:00`;
   return Math.floor(new Date(iso).getTime() / 1000);
-}
-
-function toEpochMilliseconds(date, time) {
-  const iso = `${date}T${time}:00+08:00`;
-  return new Date(iso).getTime();
 }
 
 function normalizeCalendarProvider(value) {

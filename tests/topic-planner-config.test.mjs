@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import {
   createDefaultPlannerSettings,
+  getVaultProfile,
   normalizePlannerSettings,
   resolvePlannerPaths,
 } from '../topic-planner-config.mjs';
@@ -14,6 +15,7 @@ test('createDefaultPlannerSettings exposes editable relative directories for fir
   assert.equal(settings.topicDir, '40_行动卡片');
   assert.equal(settings.inboxDir, '00_收件箱');
   assert.equal(settings.archiveDir, '99_系统/归档/行动卡片');
+  assert.deepEqual(settings.vaultProfiles, {});
   assert.equal(settings.calendarProvider, 'none');
   assert.equal(settings.macosCalendarName, '');
   assert.equal(settings.wikiMode, 'off');
@@ -79,6 +81,109 @@ test('normalizePlannerSettings falls back on unknown calendar provider', () => {
     { label: '下午制作', start: '14:00', end: '15:30' },
     { label: '晚上发布', start: '20:00', end: '20:30' },
   ]);
+});
+
+test('normalizePlannerSettings keeps complete per-Vault directory profiles', () => {
+  const normalized = normalizePlannerSettings({
+    vaultProfiles: {
+      '/Users/demo/Work Vault/': {
+        topicDir: '/内容/选题库/',
+        inboxDir: '/收件箱/',
+        archiveDir: '/归档/行动卡片/',
+        wikiDir: '/研究/Wiki/',
+        wikiIndexPath: '/研究/Wiki/index.md/',
+        wikiLogPath: '/研究/Wiki/log.md/',
+      },
+      relative: {
+        topicDir: 'topics',
+        inboxDir: 'inbox',
+        archiveDir: 'archive',
+      },
+      '/Users/demo/Escapes': {
+        topicDir: '../topics',
+        inboxDir: 'inbox',
+        archiveDir: 'archive',
+      },
+    },
+  });
+
+  assert.deepEqual(normalized.vaultProfiles, {
+    '/Users/demo/Work Vault': {
+      topicDir: '内容/选题库',
+      inboxDir: '收件箱',
+      archiveDir: '归档/行动卡片',
+      wikiDir: '研究/Wiki',
+      wikiIndexPath: '研究/Wiki/index.md',
+      wikiLogPath: '研究/Wiki/log.md',
+    },
+  });
+});
+
+test('normalizePlannerSettings keeps Obsidian directories inside the Vault', () => {
+  const normalized = normalizePlannerSettings({
+    topicDir: '../escape',
+    inboxDir: 'safe/inbox',
+    archiveDir: '../../archive',
+    wikiDir: '../wiki',
+  });
+
+  assert.equal(normalized.topicDir, '40_行动卡片');
+  assert.equal(normalized.inboxDir, 'safe/inbox');
+  assert.equal(normalized.archiveDir, '99_系统/归档/行动卡片');
+  assert.equal(normalized.wikiDir, '30_整理Wiki');
+});
+
+test('getVaultProfile restores a saved Vault mapping', () => {
+  const profile = getVaultProfile({
+    vaultProfiles: {
+      '/Users/demo/Study Vault': {
+        topicDir: '学习/行动卡片',
+        inboxDir: '学习/收件箱',
+        archiveDir: '学习/归档',
+        wikiDir: '学习/Wiki',
+        wikiIndexPath: '学习/Wiki/index.md',
+        wikiLogPath: '学习/Wiki/log.md',
+      },
+    },
+  }, '/Users/demo/Study Vault');
+
+  assert.deepEqual(profile, {
+    topicDir: '学习/行动卡片',
+    inboxDir: '学习/收件箱',
+    archiveDir: '学习/归档',
+    wikiDir: '学习/Wiki',
+    wikiIndexPath: '学习/Wiki/index.md',
+    wikiLogPath: '学习/Wiki/log.md',
+  });
+});
+
+test('getVaultProfile treats the active legacy Vault settings as configured', () => {
+  const profile = getVaultProfile({
+    workspaceMode: 'obsidian',
+    vaultRoot: '/Users/demo/Existing Vault',
+    topicDir: '40_行动卡片',
+    inboxDir: '00_收件箱',
+    archiveDir: '99_系统/归档/行动卡片',
+  }, '/Users/demo/Existing Vault');
+
+  assert.deepEqual(profile, {
+    topicDir: '40_行动卡片',
+    inboxDir: '00_收件箱',
+    archiveDir: '99_系统/归档/行动卡片',
+    wikiDir: '30_整理Wiki',
+    wikiIndexPath: '30_整理Wiki/index.md',
+    wikiLogPath: '30_整理Wiki/log.md',
+  });
+});
+
+test('getVaultProfile returns null for a Vault that has not been configured', () => {
+  assert.equal(getVaultProfile({
+    workspaceMode: 'obsidian',
+    vaultRoot: '/Users/demo/Existing Vault',
+    topicDir: '40_行动卡片',
+    inboxDir: '00_收件箱',
+    archiveDir: '99_系统/归档/行动卡片',
+  }, '/Users/demo/New Vault'), null);
 });
 
 test('resolvePlannerPaths joins vault root with configured directories', () => {

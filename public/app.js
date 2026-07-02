@@ -14,6 +14,7 @@ const state = {
   inboxCandidates: [],
   inboxSummary: null,
   settings: null,
+  hasSavedConfig: false,
   configPath: "",
   lark: null,
   macosCalendars: [],
@@ -41,6 +42,8 @@ const state = {
   dailyInboxPendingPaths: null,
   scheduleQueue: [],
   importResultItems: [],
+  vaultDirectoryStatus: null,
+  vaultDirectoryEditing: false,
 };
 
 const elements = {
@@ -91,6 +94,11 @@ const elements = {
   vaultRootLabel: document.querySelector("#vaultRootLabel"),
   workspaceModeObsidian: document.querySelector("#modeObsidian"),
   workspaceModeStandalone: document.querySelector("#modeStandalone"),
+  directoryPickerButtons: document.querySelectorAll("[data-directory-picker]"),
+  directoryLinkIndicators: document.querySelectorAll("[data-directory-link]"),
+  vaultLinkBanner: document.querySelector("#vaultLinkBanner"),
+  vaultLinkMessage: document.querySelector("#vaultLinkMessage"),
+  configureVaultDirsBtn: document.querySelector("#configureVaultDirsBtn"),
   larkRepairBtn: document.querySelector("#larkRepairBtn"),
   workspaceKind: document.querySelector("#workspaceKind"),
   workspaceConfigPath: document.querySelector("#workspaceConfigPath"),
@@ -250,9 +258,41 @@ function bindEvents() {
     }
   });
   elements.plannerSettingsForm?.addEventListener("submit", submitPlannerSettings);
-  document.querySelectorAll('input[name="workspaceMode"]').forEach((input) => {
-    input.addEventListener("change", () => applyWorkspaceMode(input.value));
+  elements.directoryPickerButtons.forEach((button) => {
+    button.addEventListener("click", () => choosePlannerDirectory(button.dataset.directoryPicker));
   });
+  ["vault", "topic", "inbox", "archive"].forEach((target) => {
+    const input = getDirectoryPickerInput(target);
+    input?.addEventListener("click", () => {
+      const button = getDirectoryPickerButton(target);
+      if (input.readOnly && button && !button.hidden) choosePlannerDirectory(target);
+    });
+    input?.addEventListener("keydown", (event) => {
+      const button = getDirectoryPickerButton(target);
+      if (input.readOnly && button && !button.hidden && ["Enter", " "].includes(event.key)) {
+        event.preventDefault();
+        choosePlannerDirectory(target);
+      }
+    });
+  });
+  document.querySelectorAll('input[name="workspaceMode"]').forEach((input) => {
+    input.addEventListener("change", () => {
+      if (input.value === "obsidian") {
+        const vaultRoot = getDirectoryPickerValue(elements.plannerVaultRoot);
+        const profile = getSavedVaultProfile(vaultRoot);
+        setVaultDirectoryStatus({
+          vaultRoot,
+          configured: Boolean(profile),
+          directories: profile || { topicDir: "", inboxDir: "", archiveDir: "" },
+        });
+      } else {
+        state.vaultDirectoryStatus = null;
+        state.vaultDirectoryEditing = false;
+        applyWorkspaceMode(input.value);
+      }
+    });
+  });
+  elements.configureVaultDirsBtn?.addEventListener("click", () => startVaultDirectoryConfiguration());
   elements.prevWeekBtn.addEventListener("click", () => {
     state.weekOffset -= 1;
     render();
@@ -322,6 +362,7 @@ async function loadTopics() {
     state.inboxCandidates = payload.inboxCandidates || [];
     state.inboxSummary = payload.inboxSummary || null;
     state.settings = payload.settings || null;
+    state.hasSavedConfig = Boolean(payload.hasSavedConfig);
     state.configPath = payload.configPath || "";
     state.lark = payload.lark || null;
     if (isSampleWorkspace() && state.inboxPageSize > 5) {
@@ -463,15 +504,29 @@ function renderPlannerSettings() {
   } else if (elements.workspaceModeObsidian) {
     elements.workspaceModeObsidian.checked = true;
   }
+  setDirectoryPickerValue(elements.plannerVaultRoot, state.settings.vaultRoot || '', { resetFallback: true });
+  setDirectoryPickerValue(elements.plannerTopicDir, state.settings.topicDir || '', { resetFallback: true });
+  setDirectoryPickerValue(elements.plannerInboxDir, state.settings.inboxDir || '', { resetFallback: true });
+  setDirectoryPickerValue(elements.plannerArchiveDir, state.settings.archiveDir || '', { resetFallback: true });
+  if (mode === "obsidian") {
+    const vaultRoot = state.settings.vaultRoot || "";
+    const profile = getSavedVaultProfile(vaultRoot);
+    const directories = profile || { topicDir: "", inboxDir: "", archiveDir: "" };
+    state.vaultDirectoryStatus = { vaultRoot, configured: Boolean(profile), directories };
+    state.vaultDirectoryEditing = !profile;
+    setDirectoryPickerValue(elements.plannerTopicDir, directories.topicDir, { resetFallback: true });
+    setDirectoryPickerValue(elements.plannerInboxDir, directories.inboxDir, { resetFallback: true });
+    setDirectoryPickerValue(elements.plannerArchiveDir, directories.archiveDir, { resetFallback: true });
+  } else {
+    state.vaultDirectoryStatus = null;
+    state.vaultDirectoryEditing = false;
+  }
   applyWorkspaceMode(mode);
-  elements.plannerVaultRoot.value = state.settings.vaultRoot || '';
-  elements.plannerTopicDir.value = state.settings.topicDir || '';
-  elements.plannerInboxDir.value = state.settings.inboxDir || '';
-  elements.plannerArchiveDir.value = state.settings.archiveDir || '';
   elements.plannerCalendarProvider.value = state.settings.calendarProvider || 'none';
   renderMacOSCalendarSelect();
   elements.plannerSettingsHint.textContent = getSettingsHint(state.settings);
   renderLarkSetupPanel();
+  renderVaultLinkBanner();
 }
 
 function renderMacOSCalendarSelect() {
@@ -1690,18 +1745,19 @@ function clearBacklogFilters() {
 async function submitPlannerSettings(event) {
   event.preventDefault();
   const workspaceMode = document.querySelector('input[name="workspaceMode"]:checked')?.value || 'obsidian';
+  const plannerDirectories = getPlannerDirectoryValues();
+  if (workspaceMode === "obsidian" && Object.values(plannerDirectories).some((value) => !value)) {
+    elements.plannerSettingsHint.textContent = "首次使用这个 Vault 时，请先选择选题、收件箱和归档目录。";
+    renderVaultLinkBanner();
+    return;
+  }
   const payload = {
     workspaceMode,
-    vaultRoot: workspaceMode === 'standalone' ? '' : elements.plannerVaultRoot.value.trim(),
-    topicDir: elements.plannerTopicDir.value.trim(),
-    inboxDir: elements.plannerInboxDir.value.trim(),
-    archiveDir: elements.plannerArchiveDir.value.trim(),
+    vaultRoot: workspaceMode === 'standalone' ? '' : getDirectoryPickerValue(elements.plannerVaultRoot),
+    ...plannerDirectories,
     calendarProvider: elements.plannerCalendarProvider.value,
     macosCalendarName: elements.plannerMacosCalendarName.value.trim(),
-    wikiMode: state.settings?.wikiMode || 'agent',
-    wikiDir: state.settings?.wikiDir || '30_研究/内容Wiki',
-    wikiIndexPath: `${state.settings?.wikiDir || '30_研究/内容Wiki'}/index.md`,
-    wikiLogPath: `${state.settings?.wikiDir || '30_研究/内容Wiki'}/log.md`,
+    ...getPlannerWikiValues(workspaceMode, workspaceMode === 'standalone' ? '' : getDirectoryPickerValue(elements.plannerVaultRoot)),
     dailyCapacity: state.settings?.dailyCapacity || RECOMMENDED_DAILY_CAPACITY,
     scheduleTimeSlots: getScheduleTimeSlots(),
   };
@@ -1718,6 +1774,18 @@ async function submitPlannerSettings(event) {
       throw new Error(data.error || '保存目录设置失败');
     }
     state.settings = data.settings || payload;
+    if (workspaceMode === "obsidian") {
+      const directories = getSavedVaultProfile(payload.vaultRoot) || {
+        ...plannerDirectories,
+        ...getPlannerWikiValues(workspaceMode, payload.vaultRoot),
+      };
+      state.vaultDirectoryStatus = {
+        vaultRoot: payload.vaultRoot,
+        configured: true,
+        directories,
+      };
+      state.vaultDirectoryEditing = false;
+    }
     elements.plannerSettingsHint.textContent = '目录设置已保存。';
     await loadTopics();
     await loadSettingsDiagnostics();
@@ -1728,25 +1796,274 @@ async function submitPlannerSettings(event) {
   }
 }
 
+function formatDirectoryDisplayName(value) {
+  const rawValue = String(value || "").trim();
+  if (!rawValue) return "";
+  if (rawValue === ".") return "Vault 根目录";
+  const withoutTrailingSlashes = rawValue.replace(/[\\/]+$/g, "");
+  if (!withoutTrailingSlashes) return rawValue;
+  return withoutTrailingSlashes.split(/[\\/]/).filter(Boolean).pop() || rawValue;
+}
+
+function setDirectoryPickerValue(input, value, { resetFallback = false } = {}) {
+  if (!input) return;
+  const pathValue = String(value || "").trim();
+  if (resetFallback) delete input.dataset.manualFallback;
+  input.dataset.pathValue = pathValue;
+  input.value = formatDirectoryDisplayName(pathValue);
+  input.title = pathValue;
+}
+
+function getDirectoryPickerValue(input) {
+  if (!input) return "";
+  if (input.dataset.manualFallback === "true") {
+    return input.value.trim();
+  }
+  return String(input.dataset.pathValue || input.value || "").trim();
+}
+
+function getDirectoryPickerInput(target) {
+  return {
+    vault: elements.plannerVaultRoot,
+    topic: elements.plannerTopicDir,
+    inbox: elements.plannerInboxDir,
+    archive: elements.plannerArchiveDir,
+  }[target] || null;
+}
+
+function getDirectoryPickerLabel(target) {
+  return {
+    vault: "Vault 根目录",
+    topic: "选题目录",
+    inbox: "收件箱目录",
+    archive: "归档目录",
+  }[target] || "目录";
+}
+
+function getDirectoryPickerButton(target) {
+  return Array.from(elements.directoryPickerButtons)
+    .find((item) => item.dataset.directoryPicker === target) || null;
+}
+
+function getPlannerDirectoryValues() {
+  return {
+    topicDir: getDirectoryPickerValue(elements.plannerTopicDir),
+    inboxDir: getDirectoryPickerValue(elements.plannerInboxDir),
+    archiveDir: getDirectoryPickerValue(elements.plannerArchiveDir),
+  };
+}
+
+function getPlannerWikiValues(workspaceMode, vaultRoot) {
+  const profile = workspaceMode === "obsidian"
+    ? (state.vaultDirectoryStatus?.directories || getSavedVaultProfile(vaultRoot))
+    : null;
+  const wikiDir = profile?.wikiDir || state.settings?.wikiDir || "30_整理Wiki";
+  return {
+    wikiMode: state.settings?.wikiMode || "agent",
+    wikiDir,
+    wikiIndexPath: profile?.wikiIndexPath || `${wikiDir}/index.md`,
+    wikiLogPath: profile?.wikiLogPath || `${wikiDir}/log.md`,
+  };
+}
+
+function getSavedVaultProfile(vaultRoot) {
+  const normalizedRoot = String(vaultRoot || "").trim().replace(/[\\/]+$/g, "");
+  if (!normalizedRoot) return null;
+  const savedProfile = state.settings?.vaultProfiles?.[normalizedRoot];
+  if (savedProfile) return { ...savedProfile };
+  const activeRoot = String(state.settings?.vaultRoot || "").trim().replace(/[\\/]+$/g, "");
+  if (state.hasSavedConfig && state.settings?.workspaceMode === "obsidian" && activeRoot === normalizedRoot) {
+    return {
+      topicDir: state.settings.topicDir || "",
+      inboxDir: state.settings.inboxDir || "",
+      archiveDir: state.settings.archiveDir || "",
+      wikiDir: state.settings.wikiDir || "",
+      wikiIndexPath: state.settings.wikiIndexPath || "",
+      wikiLogPath: state.settings.wikiLogPath || "",
+    };
+  }
+  return null;
+}
+
+function setVaultDirectoryStatus(data, message = "") {
+  state.vaultDirectoryStatus = data;
+  state.vaultDirectoryEditing = !data?.configured;
+  if (data?.directories) {
+    setDirectoryPickerValue(elements.plannerTopicDir, data.directories.topicDir || "", { resetFallback: true });
+    setDirectoryPickerValue(elements.plannerInboxDir, data.directories.inboxDir || "", { resetFallback: true });
+    setDirectoryPickerValue(elements.plannerArchiveDir, data.directories.archiveDir || "", { resetFallback: true });
+  }
+  applyWorkspaceMode("obsidian");
+  if (message) elements.plannerSettingsHint.textContent = message;
+}
+
+function renderVaultLinkBanner() {
+  const banner = elements.vaultLinkBanner;
+  if (!banner) return;
+  const mode = document.querySelector('input[name="workspaceMode"]:checked')?.value || state.settings?.workspaceMode;
+  if (mode !== "obsidian") {
+    banner.hidden = true;
+    return;
+  }
+
+  banner.hidden = false;
+  const status = state.vaultDirectoryStatus;
+  if (!status) {
+    banner.hidden = true;
+    return;
+  }
+
+  if (status.configured && !state.vaultDirectoryEditing) {
+    banner.className = "settings-diag-banner vault-link-banner is-ok";
+    elements.vaultLinkMessage.textContent = "已加载这个 Vault 保存的选题、收件箱和归档目录。";
+    elements.configureVaultDirsBtn.hidden = false;
+    return;
+  }
+
+  const selectedCount = Object.values(getPlannerDirectoryValues()).filter(Boolean).length;
+  banner.className = "settings-diag-banner vault-link-banner is-warn";
+  elements.vaultLinkMessage.textContent = status.configured
+    ? `正在重新配置这个 Vault 的目录，已选择 ${selectedCount} / 3。`
+    : `第一次使用这个 Vault，请选择三个目录后保存。已选择 ${selectedCount} / 3。`;
+  elements.configureVaultDirsBtn.hidden = true;
+}
+
+function startVaultDirectoryConfiguration() {
+  if (!state.vaultDirectoryStatus) return;
+  state.vaultDirectoryEditing = true;
+  applyWorkspaceMode("obsidian");
+  elements.plannerSettingsHint.textContent = "请选择这个 Vault 的三个目录，保存后会更新联动配置。";
+}
+
+async function choosePlannerDirectory(target) {
+  const input = getDirectoryPickerInput(target);
+  const button = getDirectoryPickerButton(target);
+  if (!input || !button || button.disabled || button.hidden) return;
+
+  const label = getDirectoryPickerLabel(target);
+  button.disabled = true;
+  input.setAttribute("aria-busy", "true");
+  elements.plannerSettingsHint.textContent = `正在打开${label}选择器…`;
+
+  try {
+    const workspaceMode = document.querySelector('input[name="workspaceMode"]:checked')?.value || "obsidian";
+    const response = await fetch("/api/system/select-directory", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        target,
+        currentPath: getDirectoryPickerValue(input),
+        vaultRoot: getDirectoryPickerValue(elements.plannerVaultRoot),
+        workspaceMode,
+        directories: getPlannerDirectoryValues(),
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      const pickerError = new Error(data.error || `无法选择${label}`);
+      pickerError.status = response.status;
+      throw pickerError;
+    }
+    if (data.canceled) {
+      elements.plannerSettingsHint.textContent = `已取消选择，${label}保持不变。`;
+      return;
+    }
+    setDirectoryPickerValue(input, data.path || getDirectoryPickerValue(input), { resetFallback: true });
+    if (target === "vault" && data.vault) {
+      setVaultDirectoryStatus(
+        data.vault,
+        data.vault.configured
+          ? "Vault 已切换，已恢复它保存的三个目录。"
+          : "这是第一次使用这个 Vault，请选择三个目录后保存。",
+      );
+      return;
+    }
+    if (workspaceMode === "obsidian") {
+      const existingDirectories = state.vaultDirectoryStatus?.directories || {};
+      state.vaultDirectoryStatus = {
+        vaultRoot: getDirectoryPickerValue(elements.plannerVaultRoot),
+        configured: Boolean(state.vaultDirectoryStatus?.configured),
+        directories: { ...existingDirectories, ...getPlannerDirectoryValues() },
+      };
+      state.vaultDirectoryEditing = true;
+      renderVaultLinkBanner();
+    }
+    const convertedHint = workspaceMode === "obsidian" && target !== "vault"
+      ? "，已转换为 Vault 内相对路径"
+      : "";
+    elements.plannerSettingsHint.textContent = `${label}已选择${convertedHint}，保存后生效。`;
+  } catch (error) {
+    if (error.status === 400 || error.status === 403) {
+      elements.plannerSettingsHint.textContent = error.message;
+      return;
+    }
+    const fallbackPathValue = getDirectoryPickerValue(input);
+    input.dataset.manualFallback = "true";
+    input.value = fallbackPathValue;
+    input.readOnly = false;
+    input.classList.remove("is-picker-trigger");
+    input.title = input.value;
+    input.focus();
+    elements.plannerSettingsHint.textContent = `${error.message} 已切换为手动输入。`;
+  } finally {
+    button.disabled = false;
+    input.removeAttribute("aria-busy");
+  }
+}
+
 function applyWorkspaceMode(mode) {
   const isStandalone = mode === 'standalone';
+  const isLinkedVault = !isStandalone
+    && state.vaultDirectoryStatus?.configured
+    && !state.vaultDirectoryEditing;
   if (elements.vaultRootLabel) {
     elements.vaultRootLabel.hidden = isStandalone;
   }
   if (elements.plannerTopicDir) {
-    elements.plannerTopicDir.placeholder = isStandalone ? '/Users/you/行动卡片' : '40_行动卡片';
+    elements.plannerTopicDir.placeholder = isStandalone ? '行动卡片' : '40_行动卡片';
   }
   if (elements.plannerInboxDir) {
-    elements.plannerInboxDir.placeholder = isStandalone ? '/Users/you/收件箱' : '00_收件箱';
+    elements.plannerInboxDir.placeholder = isStandalone ? '收件箱' : '00_收件箱';
   }
   if (elements.plannerArchiveDir) {
-    elements.plannerArchiveDir.placeholder = isStandalone ? '/Users/you/归档' : '99_系统/归档/行动卡片';
+    elements.plannerArchiveDir.placeholder = isStandalone ? '归档' : '行动卡片';
   }
+  elements.directoryPickerButtons.forEach((button) => {
+    const target = button.dataset.directoryPicker;
+    button.hidden = target === "vault" ? isStandalone : (!isStandalone && isLinkedVault);
+  });
+  elements.directoryLinkIndicators.forEach((indicator) => {
+    indicator.hidden = !isLinkedVault;
+  });
+  [
+    ["vault", elements.plannerVaultRoot],
+    ["topic", elements.plannerTopicDir],
+    ["inbox", elements.plannerInboxDir],
+    ["archive", elements.plannerArchiveDir],
+  ].forEach(([target, input]) => {
+    if (!input) return;
+    const isActivePicker = target === "vault"
+      ? !isStandalone
+      : (isStandalone || !isLinkedVault);
+    const isLinkedDirectory = isLinkedVault && target !== "vault";
+    if (isLinkedDirectory) delete input.dataset.manualFallback;
+    input.readOnly = isLinkedDirectory || (isActivePicker && input.dataset.manualFallback !== "true");
+    input.classList.toggle("is-picker-trigger", isActivePicker && input.readOnly);
+    input.classList.toggle("is-linked-directory", isLinkedDirectory);
+    if (isActivePicker && input.readOnly) {
+      input.setAttribute("aria-haspopup", "dialog");
+    } else {
+      input.removeAttribute("aria-haspopup");
+    }
+  });
   if (elements.plannerSettingsHint) {
     elements.plannerSettingsHint.textContent = isStandalone
-      ? '独立模式：三个目录都填本机绝对路径，不需要 Obsidian。'
-      : 'Obsidian 模式：填 Vault 根目录，三个目录用相对路径。';
+      ? '独立模式：点击路径框或文件夹按钮，直接选择本机目录。'
+      : (isLinkedVault
+        ? 'Obsidian 模式：三个目录已跟随当前 Vault 自动接入。'
+        : 'Obsidian 模式：首次使用这个 Vault，请选择三个目录并保存。');
   }
+  renderVaultLinkBanner();
 }
 
 async function loadSettingsDiagnostics() {

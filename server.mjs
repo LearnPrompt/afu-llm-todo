@@ -8,7 +8,13 @@ import { fileURLToPath } from "node:url";
 import { buildTopicDraftFromInbox, deriveInboxCandidate } from "./inbox-import.mjs";
 import { appendOperationLog } from "./operation-log.mjs";
 import {
+  formatPlannerDirectorySelection,
+  resolvePlannerDirectoryPickerStart,
+  selectNativeDirectory,
+} from "./native-directory-picker.mjs";
+import {
   getPlannerConfigPath,
+  getVaultProfile,
   loadPlannerSettings,
   resolvePlannerPaths,
   savePlannerSettings,
@@ -102,6 +108,12 @@ createServer(async (req, res) => {
       return respondJson(res, await savePlannerSettingsPayload(body));
     }
 
+    if (url.pathname === "/api/system/select-directory" && req.method === "POST") {
+      assertLocalRequest(req);
+      const body = await readJsonBody(req);
+      return respondJson(res, await selectPlannerDirectory(body));
+    }
+
     if (url.pathname === "/api/diagnostics" && req.method === "GET") {
       return respondJson(res, await buildDiagnosticsPayload());
     }
@@ -177,6 +189,7 @@ async function buildTopicsPayload() {
   const settings = await getPlannerSettings();
   return {
     configPath: getPlannerConfigPath(PROJECT_ROOT),
+    hasSavedConfig: await plannerConfigExists(),
     workspace: settings.vaultRoot,
     generatedAt: new Date().toISOString(),
     timezone: TIMEZONE,
@@ -217,30 +230,162 @@ async function getPlannerSettingsPayload() {
   return {
     ok: true,
     configPath: getPlannerConfigPath(PROJECT_ROOT),
+    hasSavedConfig: await plannerConfigExists(),
     settings,
   };
 }
 
 async function savePlannerSettingsPayload(payload) {
   const workspaceMode = payload.workspaceMode === 'standalone' ? 'standalone' : 'obsidian';
-  if (workspaceMode === 'obsidian' && !optionalString(payload.vaultRoot)) {
+  const requestedVaultRoot = optionalString(payload.vaultRoot);
+  if (workspaceMode === 'obsidian' && !requestedVaultRoot) {
     throw badRequest("Obsidian 模式必须填写 Vault 根目录");
+  }
+  if (workspaceMode === 'obsidian' && !path.isAbsolute(requestedVaultRoot)) {
+    throw badRequest("Obsidian 模式的 Vault 根目录必须是本机绝对路径");
   }
 
   if (isDemoConfigRun()) {
-    const requestedVaultRoot = path.resolve(optionalString(payload.vaultRoot));
-    if (requestedVaultRoot !== SAMPLE_VAULT_ROOT) {
+    const resolvedRequestedVaultRoot = path.resolve(requestedVaultRoot);
+    if (resolvedRequestedVaultRoot !== SAMPLE_VAULT_ROOT) {
       throw badRequest("当前 4317 运行在 Sample Vault 演示环境，不能把 demo 配置保存成真实 Vault。请切回真实服务后再保存真实路径。");
     }
   }
 
-  const settings = await savePlannerSettings(payload, { projectRoot: PROJECT_ROOT });
+  const currentSettings = await getPlannerSettings();
+  const vaultProfiles = { ...(currentSettings.vaultProfiles || {}) };
+  const hasPlannerConfig = await plannerConfigExists();
+  if (hasPlannerConfig && currentSettings.workspaceMode === "obsidian") {
+    const currentVaultRoot = path.resolve(currentSettings.vaultRoot);
+    vaultProfiles[currentVaultRoot] = {
+      ...(vaultProfiles[currentVaultRoot] || {}),
+      ...buildVaultProfileFromSettings(currentSettings),
+    };
+  }
+  const nextPayload = { ...payload, vaultProfiles };
+  if (workspaceMode === "obsidian") {
+    const vaultRoot = path.resolve(requestedVaultRoot);
+    const existingProfile = vaultProfiles[vaultRoot] || {};
+    const switchingVault = currentSettings.workspaceMode !== "obsidian"
+      || path.resolve(currentSettings.vaultRoot) !== vaultRoot;
+    const topicDir = validateVaultRelativeDirectory(payload.topicDir, "选题目录");
+    const inboxDir = validateVaultRelativeDirectory(payload.inboxDir, "收件箱目录");
+    const archiveDir = validateVaultRelativeDirectory(payload.archiveDir, "归档目录");
+    if (!topicDir || !inboxDir || !archiveDir) {
+      throw badRequest("首次使用这个 Vault 时，请先选择选题、收件箱和归档目录");
+    }
+    const profileWikiDir = optionalString(existingProfile.wikiDir);
+    const wikiDirSource = switchingVault && profileWikiDir
+      ? profileWikiDir
+      : (optionalString(payload.wikiDir) || profileWikiDir || currentSettings.wikiDir);
+    const wikiDir = validateVaultRelativeDirectory(wikiDirSource, "Wiki 目录");
+    const wikiIndexPath = validateVaultRelativeDirectory(
+      switchingVault && optionalString(existingProfile.wikiIndexPath)
+        ? existingProfile.wikiIndexPath
+        : (optionalString(payload.wikiIndexPath) || `${wikiDir}/index.md`),
+      "Wiki Index",
+    );
+    const wikiLogPath = validateVaultRelativeDirectory(
+      switchingVault && optionalString(existingProfile.wikiLogPath)
+        ? existingProfile.wikiLogPath
+        : (optionalString(payload.wikiLogPath) || `${wikiDir}/log.md`),
+      "Wiki Log",
+    );
+    nextPayload.vaultRoot = vaultRoot;
+    nextPayload.topicDir = topicDir;
+    nextPayload.inboxDir = inboxDir;
+    nextPayload.archiveDir = archiveDir;
+    nextPayload.wikiDir = wikiDir;
+    nextPayload.wikiIndexPath = wikiIndexPath;
+    nextPayload.wikiLogPath = wikiLogPath;
+    nextPayload.vaultProfiles[vaultRoot] = {
+      topicDir,
+      inboxDir,
+      archiveDir,
+      wikiDir,
+      wikiIndexPath,
+      wikiLogPath,
+    };
+  }
+
+  const settings = await savePlannerSettings(nextPayload, { projectRoot: PROJECT_ROOT });
   plannerSettingsCache = settings;
   resetRuntimeCaches();
   return {
     ok: true,
     configPath: getPlannerConfigPath(PROJECT_ROOT),
     settings,
+  };
+}
+
+function buildVaultProfileFromSettings(settings) {
+  return {
+    topicDir: settings.topicDir,
+    inboxDir: settings.inboxDir,
+    archiveDir: settings.archiveDir,
+    wikiDir: settings.wikiDir,
+    wikiIndexPath: settings.wikiIndexPath,
+    wikiLogPath: settings.wikiLogPath,
+  };
+}
+
+async function selectPlannerDirectory(payload) {
+  const prompts = {
+    vault: "选择 Obsidian Vault 根目录",
+    topic: "选择选题目录",
+    inbox: "选择收件箱目录",
+    archive: "选择归档目录",
+  };
+  const target = optionalString(payload.target);
+  if (!prompts[target]) {
+    throw badRequest("未知的目录类型");
+  }
+
+  const currentPath = optionalString(payload.currentPath);
+  const vaultRoot = optionalString(payload.vaultRoot);
+  if (currentPath.length > 4096 || vaultRoot.length > 4096) {
+    throw badRequest("目录路径过长");
+  }
+  const workspaceMode = payload.workspaceMode === "obsidian" ? "obsidian" : "standalone";
+  const pickerCurrentPath = resolvePlannerDirectoryPickerStart({
+    target,
+    currentPath,
+    vaultRoot,
+    workspaceMode,
+  });
+
+  const result = await selectNativeDirectory({
+    currentPath: pickerCurrentPath,
+    prompt: prompts[target],
+  });
+  if (result.canceled) {
+    return { ok: true, ...result };
+  }
+
+  if (target === "vault") {
+    const settings = await getPlannerSettings();
+    const profile = await plannerConfigExists() ? getVaultProfile(settings, result.path) : null;
+    return {
+      ok: true,
+      canceled: false,
+      path: result.path,
+      vault: {
+        vaultRoot: result.path,
+        configured: Boolean(profile),
+        directories: profile || { topicDir: "", inboxDir: "", archiveDir: "" },
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    canceled: false,
+    path: formatPlannerDirectorySelection({
+      target,
+      selectedPath: result.path,
+      vaultRoot,
+      workspaceMode,
+    }),
   };
 }
 
@@ -1896,6 +2041,15 @@ function isDemoConfigRun() {
   return isPathInside(SAMPLE_VAULT_ROOT, configPath);
 }
 
+async function plannerConfigExists() {
+  try {
+    await fs.access(getPlannerConfigPath(PROJECT_ROOT));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function isPathInside(parentPath, childPath) {
   const relative = path.relative(path.resolve(parentPath), path.resolve(childPath));
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
@@ -1952,6 +2106,32 @@ function normalizeCalendarProvider(value) {
 
 function optionalString(value) {
   return value === undefined || value === null ? "" : String(value).trim();
+}
+
+function validateVaultRelativeDirectory(value, label) {
+  const rawValue = optionalString(value).replace(/\\/g, "/");
+  const withoutTrailingSlashes = rawValue.replace(/\/+$/g, "");
+  if (!withoutTrailingSlashes) return "";
+  if (path.posix.isAbsolute(withoutTrailingSlashes)) {
+    throw badRequest(`${label}必须是当前 Vault 内的相对路径`);
+  }
+  const normalized = path.posix.normalize(withoutTrailingSlashes);
+  if (normalized === ".." || normalized.startsWith("../")) {
+    throw badRequest(`${label}不能指向 Vault 外部`);
+  }
+  return normalized;
+}
+
+function assertLocalRequest(req) {
+  const address = optionalString(req.socket?.remoteAddress).toLowerCase();
+  const isLoopback = address === "::1"
+    || address.startsWith("127.")
+    || address.startsWith("::ffff:127.");
+  if (!isLoopback) {
+    const error = new Error("文件夹选择器只能从本机打开");
+    error.statusCode = 403;
+    throw error;
+  }
 }
 
 function todayString() {

@@ -43,6 +43,7 @@ function defaultVaultRoot(projectRoot = process.cwd()) {
 function createDefaultPlannerSettings(projectRoot = process.cwd()) {
   return {
     vaultRoot: defaultVaultRoot(projectRoot),
+    vaultProfiles: {},
     ...DEFAULT_WORKSPACE,
     ...DEFAULT_DIRS,
     ...DEFAULT_CALENDAR,
@@ -56,12 +57,44 @@ function trimTrailingSlashes(value) {
 }
 
 function normalizeRelativeDir(value, fallback) {
-  const trimmed = trimTrailingSlashes(value).replace(/^[\\/]+/g, '');
-  return trimmed || fallback;
+  const trimmed = trimTrailingSlashes(value).replace(/^[\\/]+/g, '').replace(/\\/g, '/');
+  const normalized = trimmed ? path.posix.normalize(trimmed) : '';
+  if (normalized === '..' || normalized.startsWith('../')) return fallback;
+  if (normalized === '.') return normalized;
+  return normalized || fallback;
 }
 
 function normalizeWorkspaceMode(value) {
   return ['obsidian', 'standalone'].includes(String(value || '').trim()) ? value : 'obsidian';
+}
+
+function normalizeOptionalRelativeDir(value) {
+  return normalizeRelativeDir(value, '');
+}
+
+function normalizeVaultProfiles(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const profiles = {};
+  for (const [vaultRoot, profile] of Object.entries(value)) {
+    const normalizedRoot = trimTrailingSlashes(vaultRoot);
+    if (!path.isAbsolute(normalizedRoot) || !profile || typeof profile !== 'object') continue;
+    const topicDir = normalizeOptionalRelativeDir(profile.topicDir);
+    const inboxDir = normalizeOptionalRelativeDir(profile.inboxDir);
+    const archiveDir = normalizeOptionalRelativeDir(profile.archiveDir);
+    if (!topicDir || !inboxDir || !archiveDir) continue;
+    const wikiDir = normalizeOptionalRelativeDir(profile.wikiDir);
+    const wikiIndexPath = normalizeOptionalRelativeDir(profile.wikiIndexPath);
+    const wikiLogPath = normalizeOptionalRelativeDir(profile.wikiLogPath);
+    profiles[path.resolve(normalizedRoot)] = {
+      topicDir,
+      inboxDir,
+      archiveDir,
+      ...(wikiDir ? { wikiDir } : {}),
+      ...(wikiIndexPath ? { wikiIndexPath } : {}),
+      ...(wikiLogPath ? { wikiLogPath } : {}),
+    };
+  }
+  return profiles;
 }
 
 function normalizeDirForMode(value, fallback, mode) {
@@ -109,6 +142,7 @@ function normalizePlannerSettings(settings = {}, projectRoot = process.cwd()) {
   return {
     workspaceMode,
     vaultRoot: trimTrailingSlashes(settings.vaultRoot || defaults.vaultRoot) || defaults.vaultRoot,
+    vaultProfiles: normalizeVaultProfiles(settings.vaultProfiles),
     topicDir: normalizeDirForMode(settings.topicDir, defaults.topicDir, workspaceMode),
     inboxDir: normalizeDirForMode(settings.inboxDir, defaults.inboxDir, workspaceMode),
     archiveDir: normalizeDirForMode(settings.archiveDir, defaults.archiveDir, workspaceMode),
@@ -121,6 +155,27 @@ function normalizePlannerSettings(settings = {}, projectRoot = process.cwd()) {
     dailyCapacity: normalizeDailyCapacity(settings.dailyCapacity, defaults.dailyCapacity),
     scheduleTimeSlots: normalizeScheduleTimeSlots(settings.scheduleTimeSlots, defaults.scheduleTimeSlots),
   };
+}
+
+function getVaultProfile(settings, vaultRoot) {
+  const normalized = normalizePlannerSettings(settings);
+  const normalizedRoot = trimTrailingSlashes(vaultRoot);
+  if (!path.isAbsolute(normalizedRoot)) return null;
+  const resolvedRoot = path.resolve(normalizedRoot);
+  if (normalized.vaultProfiles[resolvedRoot]) {
+    return { ...normalized.vaultProfiles[resolvedRoot] };
+  }
+  if (normalized.workspaceMode === 'obsidian' && path.resolve(normalized.vaultRoot) === resolvedRoot) {
+    return {
+      topicDir: normalized.topicDir,
+      inboxDir: normalized.inboxDir,
+      archiveDir: normalized.archiveDir,
+      wikiDir: normalized.wikiDir,
+      wikiIndexPath: normalized.wikiIndexPath,
+      wikiLogPath: normalized.wikiLogPath,
+    };
+  }
+  return null;
 }
 
 function resolvePlannerPaths(settings) {
@@ -173,6 +228,7 @@ async function savePlannerSettings(settings, { projectRoot = process.cwd() } = {
 export {
   createDefaultPlannerSettings,
   getPlannerConfigPath,
+  getVaultProfile,
   loadPlannerSettings,
   normalizePlannerSettings,
   resolvePlannerPaths,

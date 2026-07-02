@@ -462,6 +462,86 @@ body {
   padding: 10px 0 2px;
 }
 
+.directory-field {
+  min-width: 0;
+}
+
+.directory-picker-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 46px;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.directory-picker-control input {
+  min-width: 0;
+}
+
+.directory-picker-control input.is-picker-trigger {
+  cursor: pointer;
+}
+
+.directory-picker-btn {
+  grid-column: 2;
+  grid-row: 1;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 12px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(36, 25, 13, 0.12);
+}
+
+.directory-picker-btn svg,
+.directory-link-indicator svg {
+  width: 20px;
+  height: 20px;
+}
+
+.directory-link-indicator {
+  grid-column: 2;
+  grid-row: 1;
+  width: 46px;
+  height: 46px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 12px;
+  color: #1a6a3a;
+  background: rgba(22, 101, 52, 0.08);
+  border: 1px solid rgba(22, 101, 52, 0.15);
+}
+
+.directory-picker-control input.is-linked-directory {
+  cursor: default;
+  background: rgba(22, 101, 52, 0.04);
+}
+
+[data-theme="dark"] .directory-picker-btn {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 220, 160, 0.12);
+}
+
+[data-theme="dark"] .directory-link-indicator {
+  color: #6fcf97;
+  background: rgba(22, 101, 52, 0.18);
+  border-color: rgba(111, 207, 151, 0.18);
+}
+
+.vault-link-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.vault-link-banner .mini-btn {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+}
+
 .mode-radio-label {
   display: flex;
   align-items: center;

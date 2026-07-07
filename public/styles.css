@@ -1900,3 +1900,42 @@ button:disabled {
 }
 
 [hidden] { display: none !important; }
+
+.today-section {
+  margin-bottom: 18px;
+}
+
+.today-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.today-count {
+  min-width: 22px;
+  padding: 1px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel-strong);
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.today-empty {
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-md);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.today-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}

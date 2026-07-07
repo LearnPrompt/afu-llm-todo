@@ -152,6 +152,13 @@ const elements = {
   importResultBacklogBtn: document.querySelector("#importResultBacklogBtn"),
   importResultScheduleBtn: document.querySelector("#importResultScheduleBtn"),
   topicCardTemplate: document.querySelector("#topicCardTemplate"),
+  todayScheduledList: document.querySelector("#todayScheduledList"),
+  todayOverdueList: document.querySelector("#todayOverdueList"),
+  todayInboxList: document.querySelector("#todayInboxList"),
+  todayScheduledCount: document.querySelector("#todayScheduledCount"),
+  todayOverdueCount: document.querySelector("#todayOverdueCount"),
+  todayInboxCount: document.querySelector("#todayInboxCount"),
+  todayViewTitle: document.querySelector("#todayViewTitle"),
   appToast: document.querySelector("#appToast"),
   themeToggleBtn: document.querySelector("#themeToggleBtn"),
   heroConfigBtn: document.querySelector("#heroConfigBtn"),
@@ -165,6 +172,10 @@ async function boot() {
   elements.inboxPageSize.value = String(state.inboxPageSize);
   initTheme();
   bindEvents();
+  const requestedView = new URLSearchParams(window.location.search).get("view");
+  if (requestedView === "today") {
+    setWorkspaceView("today");
+  }
   await loadTopics();
   if (state.settings?.calendarProvider === "macos") {
     await loadMacOSCalendars();
@@ -408,12 +419,13 @@ function render() {
   renderWorkspaceView();
   renderBacklog();
   renderInboxCandidates();
+  renderToday();
   renderCalendar();
   renderToast();
 }
 
 function setWorkspaceView(view) {
-  state.workspaceView = ["backlog", "inbox"].includes(view) ? view : "inbox";
+  state.workspaceView = ["backlog", "inbox", "today"].includes(view) ? view : "inbox";
   renderWorkspaceView();
 }
 
@@ -426,6 +438,60 @@ function renderWorkspaceView() {
   elements.workspacePanels.forEach((panel) => {
     panel.classList.toggle("is-active", panel.dataset.viewPanel === state.workspaceView);
   });
+}
+
+const TODAY_HIDDEN_STAGES = new Set(["已拒绝", "已归档", "已发布"]);
+
+function renderToday() {
+  if (!elements.todayScheduledList) return;
+  const today = formatDate(new Date());
+  if (elements.todayViewTitle) {
+    elements.todayViewTitle.textContent = `今天 · ${today}`;
+  }
+
+  const activeTopics = state.topics.filter(
+    (topic) => topic.scheduledDate && !TODAY_HIDDEN_STAGES.has(topic.stage),
+  );
+  const scheduled = activeTopics
+    .filter((topic) => topic.scheduledDate === today)
+    .sort((a, b) => String(a.scheduledStart || "").localeCompare(String(b.scheduledStart || "")));
+  const overdue = activeTopics
+    .filter((topic) => topic.scheduledDate < today)
+    .sort((a, b) => String(b.scheduledDate).localeCompare(String(a.scheduledDate)));
+  const inbox = getDailyInboxCandidates(today);
+
+  renderTodayTopicList(elements.todayScheduledList, scheduled, "今天没有已排期的卡。去排期池挑一张,或享受留白。");
+  renderTodayTopicList(elements.todayOverdueList, overdue, "没有过期欠账,干净。");
+  elements.todayInboxList.replaceChildren();
+  if (inbox.length === 0) {
+    elements.todayInboxList.append(createTodayEmptyState("今天收件箱还没有新素材。"));
+  } else {
+    for (const candidate of inbox) {
+      elements.todayInboxList.append(createInboxCandidateCard(candidate));
+    }
+  }
+
+  if (elements.todayScheduledCount) elements.todayScheduledCount.textContent = String(scheduled.length);
+  if (elements.todayOverdueCount) elements.todayOverdueCount.textContent = String(overdue.length);
+  if (elements.todayInboxCount) elements.todayInboxCount.textContent = String(inbox.length);
+}
+
+function renderTodayTopicList(container, topics, emptyMessage) {
+  container.replaceChildren();
+  if (topics.length === 0) {
+    container.append(createTodayEmptyState(emptyMessage));
+    return;
+  }
+  for (const topic of topics) {
+    container.append(createTopicCard(topic, { compact: true, showUnschedule: true }));
+  }
+}
+
+function createTodayEmptyState(message) {
+  const empty = document.createElement("p");
+  empty.className = "today-empty";
+  empty.textContent = message;
+  return empty;
 }
 
 function renderHero() {

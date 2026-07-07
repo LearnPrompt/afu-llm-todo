@@ -243,7 +243,30 @@
           <div class="workspace-tabs" role="tablist" aria-label="阿福素材面板">
             <button class="workspace-tab is-active" type="button" data-workspace-view="inbox">收件箱</button>
             <button class="workspace-tab" type="button" data-workspace-view="backlog">排期池</button>
+            <button class="workspace-tab" type="button" data-workspace-view="today">今天</button>
           </div>
+
+          <section class="sidebar-view" data-view-panel="today">
+            <div class="panel-head panel-head-compact">
+              <div>
+                <p class="panel-tag">阿福今日台账</p>
+                <h2 id="todayViewTitle">今天</h2>
+              </div>
+              <span id="todayHint">开工先看这里:今天要做什么、欠了什么、进了什么。</span>
+            </div>
+            <div class="today-section">
+              <h3 class="today-section-title">今日已排期 <span id="todayScheduledCount" class="today-count"></span></h3>
+              <div id="todayScheduledList" class="topic-list today-list"></div>
+            </div>
+            <div class="today-section">
+              <h3 class="today-section-title">过期未完成 <span id="todayOverdueCount" class="today-count"></span></h3>
+              <div id="todayOverdueList" class="topic-list today-list"></div>
+            </div>
+            <div class="today-section">
+              <h3 class="today-section-title">今天新进收件箱 <span id="todayInboxCount" class="today-count"></span></h3>
+              <div id="todayInboxList" class="inbox-candidate-list today-list"></div>
+            </div>
+          </section>
 
           <section class="sidebar-view inbox-panel is-active" data-view-panel="inbox">
             <div class="panel-head panel-head-compact">

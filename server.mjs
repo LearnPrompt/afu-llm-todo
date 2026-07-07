@@ -91,6 +91,10 @@ createServer(async (req, res) => {
       return respondJson(res, await buildTopicsPayload());
     }
 
+    if (url.pathname === "/api/topics/day" && req.method === "GET") {
+      return respondJson(res, await buildDayPayload(url.searchParams.get("date")));
+    }
+
     if (url.pathname === "/api/inbox-candidates" && req.method === "GET") {
       return respondJson(res, await buildInboxCandidatesPayload());
     }
@@ -229,6 +233,57 @@ async function buildInboxCandidatesPayload() {
     candidates: inboxAnalysis.candidates,
     summary: inboxAnalysis.summary,
   };
+}
+
+const DAY_HIDDEN_STAGES = new Set(["已拒绝", "已归档", "已发布"]);
+
+// 本地时区的"今天"。todayString() 是 UTC slice,北京时间 0-8 点会算成昨天,
+// 每日视图不能用它。
+function localDateString(timeZone = TIMEZONE) {
+  return new Intl.DateTimeFormat("sv-SE", { timeZone }).format(new Date());
+}
+
+async function buildDayPayload(requestedDate) {
+  const date = requestedDate ? normalizeDateString(requestedDate) : localDateString();
+  if (!date) {
+    throw badRequest("date 参数格式必须是 YYYY-MM-DD");
+  }
+
+  const topics = await listTopics();
+  const active = topics.filter((topic) => topic.scheduledDate && !DAY_HIDDEN_STAGES.has(topic.stage));
+  const scheduled = active
+    .filter((topic) => topic.scheduledDate === date)
+    .sort((a, b) => String(a.scheduledStart || "").localeCompare(String(b.scheduledStart || "")));
+  const overdue = active
+    .filter((topic) => topic.scheduledDate < date)
+    .sort((a, b) => String(b.scheduledDate).localeCompare(String(a.scheduledDate)));
+
+  const { inboxDir } = await resolvePlannerDirs();
+  const inboxAnalysis = await analyzeInboxCandidates(topics);
+  const prefix = `${inboxDir.replace(/\/+$/g, "")}/${date}/`;
+  const inboxCandidates = inboxAnalysis.candidates.filter((candidate) =>
+    String(candidate.sourcePath || "").replace(/\\/g, "/").startsWith(prefix),
+  );
+
+  return {
+    ok: true,
+    date,
+    generatedAt: new Date().toISOString(),
+    timezone: TIMEZONE,
+    scheduled,
+    overdue,
+    inboxCandidates,
+    summary: {
+      scheduledCount: scheduled.length,
+      overdueCount: overdue.length,
+      inboxCount: inboxCandidates.length,
+    },
+  };
+}
+
+async function resolvePlannerDirs() {
+  const settings = await getPlannerSettings();
+  return { inboxDir: optionalString(settings.inboxDir) || "00_收件箱" };
 }
 
 async function getPlannerSettingsPayload() {

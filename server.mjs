@@ -6,6 +6,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildTopicDraftFromInbox, deriveInboxCandidate } from "./inbox-import.mjs";
+import {
+  buildAppleScriptDate,
+  buildDeleteEventsByTopicScript,
+  planCalendarCleanup,
+  toAppleScriptString,
+} from "./macos-calendar.mjs";
 import { appendOperationLog } from "./operation-log.mjs";
 import {
   formatPlannerDirectorySelection,
@@ -27,7 +33,7 @@ import {
   buildWikiIngestPacket,
   ensureWikiFiles,
 } from "./wiki-mode.mjs";
-import { normalizeDisplayTitle } from "./topic-utils.mjs";
+import { formatCalendarSyncError, normalizeDisplayTitle } from "./topic-utils.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = __dirname;
@@ -1577,11 +1583,15 @@ async function deleteLarkEvent(topic) {
 }
 
 async function deleteSyncedCalendarEvent(topic) {
-  if (topic.lark_event_id) {
-    await deleteLarkEvent(topic);
-  }
-  if (topic.macos_event_id) {
-    await deleteMacOSCalendarEvent(topic.macos_event_id);
+  for (const action of planCalendarCleanup(topic)) {
+    if (action.type === "lark") {
+      await deleteLarkEvent(topic);
+    } else if (action.type === "macos-uid") {
+      await deleteMacOSCalendarEvent(action.eventUid);
+    } else if (action.type === "macos-topic-sweep") {
+      // UID 可能因手工编辑/同步冲突丢失,按 topic_id 兜底清扫,避免日历攒重复日程。
+      await deleteMacOSCalendarEventsForTopic(action.topicId);
+    }
   }
 
   topic.calendar_provider = "none";
@@ -1661,20 +1671,7 @@ end tell
 async function deleteMacOSCalendarEventsForTopic(topicId) {
   const normalizedTopicId = optionalString(topicId);
   if (!normalizedTopicId) return;
-  const script = `
-tell application id "com.apple.iCal"
-  set targetNeedle to "topic_id: " & ${toAppleScriptString(normalizedTopicId)}
-  set deletedCount to 0
-  repeat with candidateCalendar in calendars
-    set matchingEvents to every event of candidateCalendar whose description contains targetNeedle
-    repeat with candidateEvent in matchingEvents
-      delete candidateEvent
-      set deletedCount to deletedCount + 1
-    end repeat
-  end repeat
-  return deletedCount as string
-end tell
-`;
+  const script = buildDeleteEventsByTopicScript(normalizedTopicId);
   await execText("osascript", ["-e", script], { timeoutMs: 60_000 });
 }
 
@@ -1710,41 +1707,6 @@ end tell
       };
     })
     .filter((calendar) => calendar.name);
-}
-
-function buildAppleScriptDate(variableName, date, time) {
-  const [year, month, day] = date.split("-").map(Number);
-  const [hour, minute] = time.split(":").map(Number);
-  const monthName = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-  ][month - 1];
-  const secondsFromMidnight = hour * 3600 + minute * 60;
-  return [
-    `  set ${variableName} to current date`,
-    `  set day of ${variableName} to 1`,
-    `  set year of ${variableName} to ${year}`,
-    `  set month of ${variableName} to ${monthName}`,
-    `  set day of ${variableName} to ${day}`,
-    `  set time of ${variableName} to ${secondsFromMidnight}`,
-  ].join("\n");
-}
-
-function toAppleScriptString(value) {
-  return `"${String(value ?? "")
-    .replace(/\\/g, "\\\\")
-    .replace(/"/g, '\\"')
-    .replace(/\r\n|\r|\n/g, '" & linefeed & "')}"`;
 }
 
 async function startLarkAuthRepair() {

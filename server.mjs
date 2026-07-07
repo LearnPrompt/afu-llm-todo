@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { buildTopicDraftFromInbox, deriveInboxCandidate } from "./inbox-import.mjs";
+import { suggestMergeGroups } from "./deepseek-client.mjs";
 import {
   buildAppleScriptDate,
   buildDeleteEventsByTopicScript,
@@ -168,6 +169,15 @@ createServer(async (req, res) => {
       return respondJson(res, await withTopicMutationLock(body.path, () => unscheduleTopic(body)));
     }
 
+    if (url.pathname === "/api/topics/merge" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      return respondJson(res, await withTopicMutationLock(body.primaryPath, () => mergeTopics(body)));
+    }
+
+    if (url.pathname === "/api/topics/suggest-merge-groups" && req.method === "POST") {
+      return respondJson(res, await buildMergeSuggestionsPayload());
+    }
+
     if (url.pathname === "/api/lark/repair/start" && req.method === "POST") {
       return respondJson(res, await startLarkAuthRepair());
     }
@@ -284,6 +294,121 @@ async function buildDayPayload(requestedDate) {
 async function resolvePlannerDirs() {
   const settings = await getPlannerSettings();
   return { inboxDir: optionalString(settings.inboxDir) || "00_收件箱" };
+}
+
+// 手动多选合并:把 mergePaths 的卡并进 primaryPath。
+// 被合并卡先清外部日历事件,再归档留底;正文以"合并进来的选题"小节
+// 追加进主卡,来源回链和原卡归档位置都保留,合并不丢信息。
+async function mergeTopics(payload) {
+  const primaryAbsPath = await resolveTopicPath(payload.primaryPath);
+  const mergeRelPaths = normalizeArray(payload.mergePaths);
+  if (!mergeRelPaths.length) {
+    throw badRequest("必须提供要合并的卡片");
+  }
+
+  const primarySource = await loadTopicSource(primaryAbsPath);
+  const primaryTitle = extractTitle(primarySource.body, path.basename(primaryAbsPath, ".md"));
+  const primaryTopic = normalizeTopic(primarySource.frontmatter, primaryTitle, primarySource.relPath);
+
+  const merged = [];
+  const calendarWarnings = [];
+  let appendBody = "";
+
+  for (const relPath of mergeRelPaths) {
+    const filePath = await resolveTopicPath(relPath);
+    if (filePath === primaryAbsPath) continue;
+
+    const source = await loadTopicSource(filePath);
+    const title = extractTitle(source.body, path.basename(filePath, ".md"));
+    const topic = normalizeTopic(source.frontmatter, title, source.relPath);
+
+    try {
+      await deleteSyncedCalendarEvent(topic);
+    } catch (error) {
+      calendarWarnings.push(`${title}: ${formatCalendarSyncError(error)}`);
+    }
+
+    topic.stage = "已归档";
+    topic.drop_action = "合并";
+    topic.drop_reason = `合并进 ${primarySource.relPath}`;
+    topic.updated = todayString();
+    const archivePath = await buildArchivePath(filePath);
+    await fs.mkdir(path.dirname(archivePath), { recursive: true });
+    await fs.writeFile(archivePath, composeMarkdown(topic, source.body), "utf8");
+    await fs.unlink(filePath);
+
+    const { vaultRoot } = await getPlannerPaths();
+    appendBody += buildMergeSection({
+      title,
+      topic,
+      body: source.body,
+      archiveRelPath: path.relative(vaultRoot, archivePath),
+    });
+    merged.push({ path: source.relPath, title });
+  }
+
+  if (!merged.length) {
+    throw badRequest("没有可合并的卡片(不能把卡片合并进自己)");
+  }
+
+  primaryTopic.updated = todayString();
+  await writeTopicFile(primaryAbsPath, primaryTopic, primarySource.body + appendBody);
+  await appendPlannerLog("topic-merge", primaryTitle, {
+    path: primarySource.relPath,
+    mergedCount: merged.length,
+    merged: merged.map((item) => item.path),
+  });
+
+  return {
+    ok: true,
+    merged,
+    calendarWarnings,
+    topic: await readTopic(primaryAbsPath),
+  };
+}
+
+function buildMergeSection({ title, topic, body, archiveRelPath }) {
+  const lines = [
+    "",
+    "---",
+    "",
+    `## 合并进来的选题(${todayString()}):${title}`,
+    "",
+    `**原卡归档:** ${archiveRelPath}`,
+  ];
+  if (topic.source_url) {
+    lines.push(`**来源:** ${topic.source_url}`);
+  }
+  if (topic.source_inbox_path) {
+    lines.push(`**收件箱原文:** ${topic.source_inbox_path}`);
+  }
+  const trimmedBody = String(body || "").trim();
+  if (trimmedBody) {
+    lines.push("", trimmedBody);
+  }
+  lines.push("");
+  return lines.join("\n");
+}
+
+// AI 建议分组:把非终态卡的标题+摘要交给 DeepSeek 判断哪些是同一选题。
+// 只出建议不动数据;没配 key / 调用失败会抛 503/502,前端降级回手动勾选。
+async function buildMergeSuggestionsPayload() {
+  const topics = await listTopics();
+  const mergeable = topics.filter((topic) => !DAY_HIDDEN_STAGES.has(topic.stage));
+  const { groups } = await suggestMergeGroups({
+    topics: mergeable.map((topic) => ({ title: topic.title, excerpt: topic.excerpt })),
+  });
+  return {
+    ok: true,
+    groups: groups.map((group) => ({
+      reason: group.reason,
+      suggestedTitle: group.suggestedTitle,
+      topics: group.indexes
+        .map((index) => mergeable[index - 1])
+        .filter(Boolean)
+        .map((topic) => ({ path: topic.path, title: topic.title })),
+    })).filter((group) => group.topics.length >= 2),
+  };
 }
 
 async function getPlannerSettingsPayload() {

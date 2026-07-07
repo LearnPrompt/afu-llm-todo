@@ -44,6 +44,10 @@ const state = {
   importResultItems: [],
   vaultDirectoryStatus: null,
   vaultDirectoryEditing: false,
+  mergeSelection: new Set(),
+  mergeSuggestions: [],
+  mergeSuggesting: false,
+  mergeSubmitting: false,
 };
 
 const elements = {
@@ -68,6 +72,10 @@ const elements = {
   backlogWindowInfo: document.querySelector("#backlogWindowInfo"),
   backlogPageSize: document.querySelector("#backlogPageSize"),
   backlogHint: document.querySelector("#backlogHint"),
+  mergeSelectedBtn: document.querySelector("#mergeSelectedBtn"),
+  aiSuggestMergeBtn: document.querySelector("#aiSuggestMergeBtn"),
+  mergeInfo: document.querySelector("#mergeInfo"),
+  mergeSuggestions: document.querySelector("#mergeSuggestions"),
   calendarGrid: document.querySelector("#calendarGrid"),
   searchInput: document.querySelector("#searchInput"),
   stageFilter: document.querySelector("#stageFilter"),
@@ -235,6 +243,9 @@ function bindEvents() {
   elements.workspaceTabs.forEach((button) => {
     button.addEventListener("click", () => setWorkspaceView(button.dataset.workspaceView));
   });
+
+  elements.mergeSelectedBtn?.addEventListener("click", handleMergeSelected);
+  elements.aiSuggestMergeBtn?.addEventListener("click", handleSuggestMergeGroups);
 
   elements.inboxPrevBtn?.addEventListener("click", () => {
     state.inboxPage = Math.max(1, state.inboxPage - 1);
@@ -701,8 +712,92 @@ function renderBacklog() {
   }
 
   for (const topic of visibleTopics) {
-    const card = createTopicCard(topic, { showUnschedule: false, compact: false });
+    const card = createTopicCard(topic, { showUnschedule: false, compact: false, mergeSelectable: true });
     elements.backlogList.append(card);
+  }
+  renderMergeToolbar();
+}
+
+function renderMergeToolbar() {
+  if (!elements.mergeInfo) return;
+  const count = state.mergeSelection.size;
+  elements.mergeSelectedBtn.disabled = state.mergeSubmitting || count < 2;
+  elements.aiSuggestMergeBtn.disabled = state.mergeSuggesting;
+  elements.aiSuggestMergeBtn.textContent = state.mergeSuggesting ? "AI 分析中…" : "AI 建议分组";
+  elements.mergeInfo.textContent = count
+    ? `已选 ${count} 张;先勾的做主卡`
+    : "勾选同一选题的卡;先勾的做主卡";
+
+  const box = elements.mergeSuggestions;
+  box.replaceChildren();
+  if (!state.mergeSuggestions.length) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  state.mergeSuggestions.forEach((group, index) => {
+    const row = document.createElement("div");
+    row.className = "merge-suggestion-row";
+    const pick = document.createElement("button");
+    pick.type = "button";
+    pick.className = "mini-btn";
+    pick.textContent = `选第 ${index + 1} 组(${group.topics.length} 张)`;
+    pick.addEventListener("click", () => {
+      state.mergeSelection = new Set(group.topics.map((topic) => topic.path));
+      renderBacklog();
+    });
+    const desc = document.createElement("span");
+    desc.textContent = `${group.suggestedTitle || group.topics[0].title}${group.reason ? ` — ${group.reason}` : ""}`;
+    row.append(pick, desc);
+    box.append(row);
+  });
+}
+
+async function handleMergeSelected() {
+  const paths = [...state.mergeSelection];
+  if (paths.length < 2) return;
+  const byPath = new Map(state.topics.map((topic) => [topic.path, topic]));
+  const titles = paths.map((p) => stripTopicPrefix(byPath.get(p)?.title || p));
+  const [primaryPath, ...mergePaths] = paths;
+  const confirmed = window.confirm(
+    `把这 ${paths.length} 张卡合并成一张?\n\n主卡(保留): ${titles[0]}\n并入(归档留底): ${titles.slice(1).join("、")}\n\n并入卡的日历事件会被清理,内容追加进主卡。`,
+  );
+  if (!confirmed) return;
+
+  state.mergeSubmitting = true;
+  renderMergeToolbar();
+  const result = await postAndReload("/api/topics/merge", { primaryPath, mergePaths });
+  state.mergeSubmitting = false;
+  if (result) {
+    state.mergeSelection = new Set();
+    state.mergeSuggestions = [];
+    const warning = result.calendarWarnings?.length ? `;日历清理警告 ${result.calendarWarnings.length} 条` : "";
+    showToast(`已合并 ${result.merged.length} 张卡进「${stripTopicPrefix(result.topic.title)}」${warning}`);
+  }
+  renderBacklog();
+}
+
+async function handleSuggestMergeGroups() {
+  state.mergeSuggesting = true;
+  renderMergeToolbar();
+  try {
+    const response = await fetch("/api/topics/suggest-merge-groups", { method: "POST" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || "AI 建议分组失败");
+    }
+    state.mergeSuggestions = data.groups || [];
+    if (!state.mergeSuggestions.length) {
+      showToast("AI 没有发现可合并的同选题卡");
+    } else {
+      state.mergeSelection = new Set(state.mergeSuggestions[0].topics.map((topic) => topic.path));
+      showToast(`AI 建议 ${state.mergeSuggestions.length} 组,已预勾第 1 组,请确认后点合并`);
+    }
+  } catch (error) {
+    showToast(`AI 建议不可用:${error.message}`);
+  } finally {
+    state.mergeSuggesting = false;
+    renderBacklog();
   }
 }
 
@@ -935,6 +1030,25 @@ function createTopicCard(topic, options = {}) {
   card.dataset.path = topic.path;
   card.dataset.stage = topic.stage;
   card.dataset.density = options.calendar ? "mini" : options.compact ? "compact" : "focus";
+  if (options.mergeSelectable) {
+    const selectLine = document.createElement("label");
+    selectLine.className = "merge-select-line";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.checked = state.mergeSelection.has(topic.path);
+    checkbox.addEventListener("change", () => {
+      if (checkbox.checked) {
+        state.mergeSelection.add(topic.path);
+      } else {
+        state.mergeSelection.delete(topic.path);
+      }
+      renderMergeToolbar();
+    });
+    const label = document.createElement("span");
+    label.textContent = "同选题";
+    selectLine.append(checkbox, label);
+    card.prepend(selectLine);
+  }
   if (!options.compact && !options.calendar && state.recentTopicPaths.includes(topic.path)) {
     card.classList.add("is-recent");
   }

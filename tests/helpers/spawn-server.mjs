@@ -59,6 +59,7 @@ async function spawnPlannerServer({ calendarProvider = 'none' } = {}) {
       TOPIC_PLANNER_CONFIG: configPath,
       LARK_CLI_PATH: larkStub,
       HOME: workRoot,
+      DEEPSEEK_API_KEY: '',
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

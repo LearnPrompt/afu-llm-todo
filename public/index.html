@@ -328,6 +328,12 @@
                   <option value="6">6 条</option>
                 </select>
               </label>
+              <div class="merge-toolbar">
+                <button id="aiSuggestMergeBtn" class="ghost-btn" type="button">AI 建议分组</button>
+                <button id="mergeSelectedBtn" class="accent-btn" type="button">合并所选</button>
+                <span id="mergeInfo" class="batch-info">勾选同一选题的卡;先勾的做主卡</span>
+              </div>
+              <div id="mergeSuggestions" class="merge-suggestions" hidden></div>
             </div>
             <div id="backlogList" class="topic-list"></div>
           </section>

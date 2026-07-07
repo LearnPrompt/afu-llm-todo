@@ -181,8 +181,8 @@ async function boot() {
   initTheme();
   bindEvents();
   const requestedView = new URLSearchParams(window.location.search).get("view");
-  if (requestedView === "today") {
-    setWorkspaceView("today");
+  if (["today", "backlog", "inbox"].includes(requestedView)) {
+    setWorkspaceView(requestedView);
   }
   await loadTopics();
   if (state.settings?.calendarProvider === "macos") {

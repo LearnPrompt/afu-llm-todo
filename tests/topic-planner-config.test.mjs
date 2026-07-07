@@ -17,6 +17,8 @@ test('createDefaultPlannerSettings exposes editable relative directories for fir
   assert.equal(settings.archiveDir, '99_系统/归档/行动卡片');
   assert.deepEqual(settings.vaultProfiles, {});
   assert.equal(settings.calendarProvider, 'none');
+  assert.equal(settings.larkCalendarId, '');
+  assert.equal(settings.larkCalendarName, '');
   assert.equal(settings.macosCalendarName, '');
   assert.equal(settings.wikiMode, 'off');
   assert.equal(settings.wikiDir, '30_整理Wiki');
@@ -37,6 +39,8 @@ test('normalizePlannerSettings trims user input and keeps relative directory lay
     inboxDir: ' /收件箱/ ',
     archiveDir: ' /归档/选题占位/ ',
     calendarProvider: 'macos',
+    larkCalendarId: ' cal_custom ',
+    larkCalendarName: ' 内容排期 ',
     macosCalendarName: ' 内容排期 ',
     wikiMode: 'agent',
     wikiDir: ' /研究/内容Wiki/ ',
@@ -54,6 +58,8 @@ test('normalizePlannerSettings trims user input and keeps relative directory lay
   assert.equal(normalized.inboxDir, '收件箱');
   assert.equal(normalized.archiveDir, '归档/选题占位');
   assert.equal(normalized.calendarProvider, 'macos');
+  assert.equal(normalized.larkCalendarId, 'cal_custom');
+  assert.equal(normalized.larkCalendarName, '内容排期');
   assert.equal(normalized.macosCalendarName, '内容排期');
   assert.equal(normalized.wikiMode, 'agent');
   assert.equal(normalized.wikiDir, '研究/内容Wiki');

@@ -41,6 +41,9 @@ Afu 不要求你的 Obsidian Vault 使用固定目录名。
   "archiveDir": "99_系统/归档/选题占位",
   "wikiMode": "agent",
   "calendarProvider": "none",
+  "larkCalendarId": "",
+  "larkCalendarName": "",
+  "macosCalendarName": "",
   "dailyCapacity": 2
 }
 ```
@@ -50,6 +53,8 @@ Afu 不要求你的 Obsidian Vault 使用固定目录名。
 - `none`，只写 Markdown
 - `macos`，同步到 macOS 本地日历
 - `lark`，同步到飞书日历
+
+选择飞书时，`larkCalendarId` / `larkCalendarName` 记录默认写入的飞书日历；留空时回退到主日历。选择 macOS 时，`macosCalendarName` 记录 Calendar.app 里的目标日历名。
 
 快捷时段可以通过 `scheduleTimeSlots` 配置。
 

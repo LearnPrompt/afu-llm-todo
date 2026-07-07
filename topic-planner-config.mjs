@@ -13,6 +13,8 @@ const DEFAULT_DIRS = {
 
 const DEFAULT_CALENDAR = {
   calendarProvider: 'none',
+  larkCalendarId: '',
+  larkCalendarName: '',
   macosCalendarName: '',
 };
 
@@ -147,6 +149,8 @@ function normalizePlannerSettings(settings = {}, projectRoot = process.cwd()) {
     inboxDir: normalizeDirForMode(settings.inboxDir, defaults.inboxDir, workspaceMode),
     archiveDir: normalizeDirForMode(settings.archiveDir, defaults.archiveDir, workspaceMode),
     calendarProvider: normalizeCalendarProvider(settings.calendarProvider, defaults.calendarProvider),
+    larkCalendarId: String(settings.larkCalendarId || defaults.larkCalendarId).trim(),
+    larkCalendarName: String(settings.larkCalendarName || defaults.larkCalendarName).trim(),
     macosCalendarName: String(settings.macosCalendarName || defaults.macosCalendarName).trim(),
     wikiMode: normalizeWikiMode(settings.wikiMode, defaults.wikiMode),
     wikiDir: normalizeRelativeDir(settings.wikiDir, defaults.wikiDir),

@@ -199,7 +199,14 @@
                     </details>
                   </div>
                 </div>
-                <label>
+                <label id="plannerLarkCalendarField" hidden>
+                  飞书日历
+                  <select id="plannerLarkCalendarId">
+                    <option value="">选择同步到飞书后自动读取</option>
+                  </select>
+                  <span id="plannerLarkCalendarStatus" class="form-hint">选择排期要写入的飞书日历。</span>
+                </label>
+                <label id="plannerMacosCalendarField">
                   macOS 日历名
                   <select id="plannerMacosCalendarName">
                     <option value="">选择同步到 macOS 后自动读取</option>

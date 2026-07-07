@@ -17,6 +17,10 @@ const state = {
   hasSavedConfig: false,
   configPath: "",
   lark: null,
+  larkCalendars: [],
+  larkCalendarsLoaded: false,
+  larkCalendarsLoading: false,
+  larkCalendarsError: "",
   macosCalendars: [],
   macosCalendarsLoaded: false,
   macosCalendarsLoading: false,
@@ -87,6 +91,10 @@ const elements = {
   larkSetupDetails: document.querySelector("#larkSetupDetails"),
   copyLarkConfigBtn: document.querySelector("#copyLarkConfigBtn"),
   copyLarkAuthBtn: document.querySelector("#copyLarkAuthBtn"),
+  plannerLarkCalendarField: document.querySelector("#plannerLarkCalendarField"),
+  plannerLarkCalendarId: document.querySelector("#plannerLarkCalendarId"),
+  plannerLarkCalendarStatus: document.querySelector("#plannerLarkCalendarStatus"),
+  plannerMacosCalendarField: document.querySelector("#plannerMacosCalendarField"),
   plannerMacosCalendarName: document.querySelector("#plannerMacosCalendarName"),
   plannerMacosCalendarStatus: document.querySelector("#plannerMacosCalendarStatus"),
   plannerSettingsHint: document.querySelector("#plannerSettingsHint"),
@@ -166,6 +174,9 @@ async function boot() {
   initTheme();
   bindEvents();
   await loadTopics();
+  if (state.settings?.calendarProvider === "lark" && state.lark?.available) {
+    await loadLarkCalendars();
+  }
   if (state.settings?.calendarProvider === "macos") {
     await loadMacOSCalendars();
   }
@@ -306,10 +317,14 @@ function bindEvents() {
   elements.copyLarkConfigBtn?.addEventListener("click", () => copyTextFromButton(elements.copyLarkConfigBtn, "lark-cli config init --new"));
   elements.copyLarkAuthBtn?.addEventListener("click", () => copyTextFromButton(elements.copyLarkAuthBtn, "lark-cli auth login --domain calendar"));
   elements.plannerCalendarProvider?.addEventListener("change", () => {
+    if (elements.plannerCalendarProvider.value === "lark" && state.lark?.available) {
+      loadLarkCalendars();
+    }
     if (elements.plannerCalendarProvider.value === "macos") {
       loadMacOSCalendars();
     }
     renderLarkSetupPanel();
+    renderLarkCalendarSelect();
     elements.plannerSettingsHint.textContent = getSettingsHint({
       ...(state.settings || {}),
       calendarProvider: elements.plannerCalendarProvider.value,
@@ -402,6 +417,34 @@ async function loadMacOSCalendars() {
   }
 }
 
+async function loadLarkCalendars() {
+  if (state.larkCalendarsLoading) return;
+  state.larkCalendarsLoading = true;
+  state.larkCalendarsError = "";
+  renderLarkCalendarSelect();
+  try {
+    const response = await fetch("/api/lark/calendars");
+    const payload = await response.json();
+    if (!response.ok || payload.ok === false) {
+      throw new Error(payload.error || payload.message || "读取飞书日历失败");
+    }
+    state.larkCalendars = (payload.calendars || [])
+      .filter((calendar) => calendar?.id && calendar?.name)
+      .map((calendar) => ({
+        id: calendar.id,
+        name: calendar.name,
+        type: calendar.type || "",
+        role: calendar.role || "",
+      }));
+    state.larkCalendarsLoaded = true;
+  } catch (error) {
+    state.larkCalendarsError = error.message || "读取飞书日历失败";
+  } finally {
+    state.larkCalendarsLoading = false;
+    renderLarkCalendarSelect();
+  }
+}
+
 function render() {
   renderHero();
   renderPlannerSettings();
@@ -477,7 +520,8 @@ function renderHero() {
   elements.larkRepairBtn.hidden = state.lark.available;
 
   if (state.lark.available) {
-    const suffix = state.lark.calendarName ? ` · ${state.lark.calendarName}` : " · 可同步";
+    const calendarName = state.settings?.larkCalendarName || state.lark.calendarName;
+    const suffix = calendarName ? ` · ${calendarName}` : " · 可同步";
     elements.larkStatus.textContent = `${state.lark.userName || "已连接"}${suffix}`;
     elements.larkStatus.style.color = "#1e6a36";
     return;
@@ -523,13 +567,92 @@ function renderPlannerSettings() {
   }
   applyWorkspaceMode(mode);
   elements.plannerCalendarProvider.value = state.settings.calendarProvider || 'none';
+  renderLarkCalendarSelect();
   renderMacOSCalendarSelect();
   elements.plannerSettingsHint.textContent = getSettingsHint(state.settings);
   renderLarkSetupPanel();
   renderVaultLinkBanner();
 }
 
+function renderLarkCalendarSelect() {
+  const field = elements.plannerLarkCalendarField;
+  const select = elements.plannerLarkCalendarId;
+  if (!field || !select) return;
+
+  const provider = elements.plannerCalendarProvider?.value || state.settings?.calendarProvider || "none";
+  field.hidden = provider !== "lark";
+  if (provider !== "lark") return;
+
+  const selectedId = state.settings?.larkCalendarId || select.value || state.lark?.calendarId || "";
+  select.innerHTML = "";
+
+  if (!state.lark?.available) {
+    select.append(new Option("先连接飞书日历", selectedId));
+    select.disabled = true;
+    if (elements.plannerLarkCalendarStatus) {
+      elements.plannerLarkCalendarStatus.textContent = "完成飞书授权后会读取可用日历。";
+    }
+    return;
+  }
+
+  select.disabled = state.larkCalendarsLoading;
+  if (state.larkCalendarsLoading) {
+    select.append(new Option("正在读取飞书日历…", selectedId));
+    select.value = selectedId;
+    if (elements.plannerLarkCalendarStatus) {
+      elements.plannerLarkCalendarStatus.textContent = "正在读取当前账号可用的飞书日历。";
+    }
+    return;
+  }
+
+  if (state.larkCalendarsError) {
+    select.append(new Option(state.settings?.larkCalendarName ? `保留当前：${state.settings.larkCalendarName}` : "读取失败，保存后仍使用主日历", selectedId));
+    select.value = selectedId;
+    if (elements.plannerLarkCalendarStatus) {
+      elements.plannerLarkCalendarStatus.textContent = `读取失败：${state.larkCalendarsError}`;
+    }
+    return;
+  }
+
+  if (!state.larkCalendarsLoaded) {
+    select.append(new Option("点击同步目标后自动读取", selectedId));
+    select.value = selectedId;
+    if (elements.plannerLarkCalendarStatus) {
+      elements.plannerLarkCalendarStatus.textContent = "选择排期要写入的飞书日历。";
+    }
+    return;
+  }
+
+  if (!state.larkCalendars.length) {
+    select.append(new Option("没有读取到飞书日历", ""));
+    select.value = "";
+    if (elements.plannerLarkCalendarStatus) {
+      elements.plannerLarkCalendarStatus.textContent = "当前飞书账号没有返回可用日历。";
+    }
+    return;
+  }
+
+  for (const calendar of state.larkCalendars) {
+    const label = calendar.type === "primary" ? `${calendar.name}（主日历）` : calendar.name;
+    select.append(new Option(label, calendar.id));
+  }
+  if (selectedId && !state.larkCalendars.some((calendar) => calendar.id === selectedId)) {
+    select.prepend(new Option(`当前配置：${state.settings?.larkCalendarName || selectedId}`, selectedId));
+  }
+  select.value = selectedId || state.larkCalendars[0].id;
+  const selectedCalendar = state.larkCalendars.find((calendar) => calendar.id === select.value);
+  if (elements.plannerLarkCalendarStatus) {
+    elements.plannerLarkCalendarStatus.textContent = selectedCalendar
+      ? `排期会写入飞书日历「${selectedCalendar.name}」。`
+      : `已读取 ${state.larkCalendars.length} 个飞书日历。`;
+  }
+}
+
 function renderMacOSCalendarSelect() {
+  if (elements.plannerMacosCalendarField) {
+    const provider = elements.plannerCalendarProvider?.value || state.settings?.calendarProvider || "none";
+    elements.plannerMacosCalendarField.hidden = provider !== "macos";
+  }
   const select = elements.plannerMacosCalendarName;
   if (!select) return;
 
@@ -1356,11 +1479,12 @@ function getLarkConnectorView(lark) {
   }
 
   if (lark.available) {
+    const calendarName = state.settings?.larkCalendarName || lark.calendarName || "主日历";
     return {
       badge: "已连接",
       tone: "is-ok",
-      message: "飞书日历已可用，排期时可以同步到主日历。授权来自本机 lark-cli 已登录的账号，请核对下方是不是你本人。",
-      account: `账号：${lark.userName || "当前用户"}（本机 lark-cli 登录）· 主日历：${lark.calendarName || "主日历"}`,
+      message: `飞书日历已可用，排期时可以同步到「${calendarName}」。授权来自本机 lark-cli 已登录的账号，请核对下方是不是你本人。`,
+      account: `账号：${lark.userName || "当前用户"}（本机 lark-cli 登录）· 当前日历：${calendarName}`,
       button: "已连接",
       action: "none",
       disabled: true,
@@ -1756,6 +1880,8 @@ async function submitPlannerSettings(event) {
     vaultRoot: workspaceMode === 'standalone' ? '' : getDirectoryPickerValue(elements.plannerVaultRoot),
     ...plannerDirectories,
     calendarProvider: elements.plannerCalendarProvider.value,
+    larkCalendarId: elements.plannerLarkCalendarId?.value || "",
+    larkCalendarName: getSelectedLarkCalendarName(),
     macosCalendarName: elements.plannerMacosCalendarName.value.trim(),
     ...getPlannerWikiValues(workspaceMode, workspaceMode === 'standalone' ? '' : getDirectoryPickerValue(elements.plannerVaultRoot)),
     dailyCapacity: state.settings?.dailyCapacity || RECOMMENDED_DAILY_CAPACITY,
@@ -2146,7 +2272,8 @@ function getSettingsHint(settings) {
   if (!settings) return '确认目录和同步目标，保存后刷新数据。';
   if (settings.calendarProvider === 'lark') {
     if (state.lark?.available) {
-      return '飞书已连接，排期时会同步到你的飞书主日历。';
+      const calendarName = settings.larkCalendarName || state.lark.calendarName || "主日历";
+      return `飞书已连接，排期时会同步到「${calendarName}」。`;
     }
     if (state.lark?.canRepair) {
       return '选择飞书后，先点击下方“开始飞书授权”完成用户日历授权。';
@@ -2164,7 +2291,7 @@ function getSettingsHint(settings) {
 function getCalendarHint(provider, lark, settings) {
   if (provider === 'lark') {
     return lark?.available
-      ? '会同步到飞书主日历，同时回写选题卡。'
+      ? `会同步到飞书日历「${settings?.larkCalendarName || lark.calendarName || "主日历"}」，同时回写选题卡。`
       : '飞书还没连上。先在首次配置里选择“同步到飞书日历”，按步骤完成初始化和授权。';
   }
   if (provider === 'macos') {
@@ -2189,7 +2316,8 @@ function getScheduleResultMessage(topic, requestedProvider) {
     return `排期已保存，并同步到 macOS「${calendarName}」。`;
   }
   if (provider === "lark") {
-    return "排期已保存，并同步到飞书日历。";
+    const calendarName = topic?.larkCalendarName || state.settings?.larkCalendarName || state.lark?.calendarName || "飞书日历";
+    return `排期已保存，并同步到飞书「${calendarName}」。`;
   }
   return "排期已保存。";
 }
@@ -2209,6 +2337,15 @@ function getScheduleTimeSlots() {
     }))
     .filter((slot) => slot.label && /^\d{2}:\d{2}$/.test(slot.start) && /^\d{2}:\d{2}$/.test(slot.end) && slot.start < slot.end);
   return normalized.length ? normalized : DEFAULT_SCHEDULE_TIME_SLOTS;
+}
+
+function getSelectedLarkCalendarName() {
+  const selectedId = elements.plannerLarkCalendarId?.value || "";
+  if (!selectedId) return "";
+  const selectedCalendar = state.larkCalendars.find((calendar) => calendar.id === selectedId);
+  if (selectedCalendar?.name) return selectedCalendar.name;
+  if (selectedId === state.lark?.calendarId) return state.lark.calendarName || "";
+  return state.settings?.larkCalendarName || "";
 }
 
 function getWorkspaceKind(settings) {

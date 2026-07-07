@@ -34,7 +34,9 @@ const PROJECT_ROOT = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_ROOT, "public");
 const SAMPLE_VAULT_ROOT = path.join(PROJECT_ROOT, "examples", "sample-vault");
 const PORT = Number(process.env.PORT || 4317);
-const TIMEZONE = "Asia/Shanghai";
+const TIMEZONE = normalizeTimeZone(
+  process.env.TOPIC_PLANNER_TIME_ZONE || Intl.DateTimeFormat().resolvedOptions().timeZone,
+);
 const LARK_CLI_CANDIDATES = [
   process.env.LARK_CLI_PATH,
   process.env.HOME ? path.join(process.env.HOME, ".npm-global/bin/lark-cli") : "",
@@ -164,6 +166,10 @@ createServer(async (req, res) => {
 
     if (url.pathname === "/api/lark/repair/finish" && req.method === "POST") {
       return respondJson(res, await finishLarkAuthRepair());
+    }
+
+    if (url.pathname === "/api/lark/calendars" && req.method === "GET") {
+      return respondJson(res, await getLarkCalendarsPayload());
     }
 
     if (url.pathname === "/api/macos/calendars" && req.method === "GET") {
@@ -1477,7 +1483,9 @@ async function syncTopicToLark({ title, topic, path: topicPath }) {
     };
   }
 
-  const calendarId = topic.lark_calendar_id || (await getPrimaryCalendarId());
+  const settings = await getPlannerSettings();
+  const preferredCalendarId = settings.larkCalendarId || "";
+  const calendarId = preferredCalendarId || topic.lark_calendar_id || (await getPrimaryCalendarId());
   const startTs = toEpochSeconds(topic.scheduled_date, topic.scheduled_start);
   const endTs = toEpochSeconds(topic.scheduled_date, topic.scheduled_end);
   const data = {
@@ -1492,6 +1500,12 @@ async function syncTopicToLark({ title, topic, path: topicPath }) {
     attendee_ability: "can_modify_event",
     free_busy_status: "busy",
   };
+
+  if (topic.lark_event_id && preferredCalendarId && topic.lark_calendar_id && topic.lark_calendar_id !== preferredCalendarId) {
+    await deleteLarkEvent(topic);
+    topic.lark_event_id = "";
+    topic.lark_calendar_id = "";
+  }
 
   if (topic.lark_event_id) {
     await execJson("lark-cli", [
@@ -1529,6 +1543,56 @@ async function syncTopicToLark({ title, topic, path: topicPath }) {
     syncStatus: eventId || wrappedEventId ? "已同步" : "同步失败",
     eventId: eventId || wrappedEventId,
     calendarId,
+  };
+}
+
+async function getLarkCalendarsPayload() {
+  const status = await getLarkStatus();
+  if (!status.available) {
+    return {
+      ok: false,
+      calendars: [],
+      message: status.message || "飞书日历还没有连接。",
+    };
+  }
+
+  const payload = await execJson("lark-cli", [
+    "calendar",
+    "calendars",
+    "list",
+    "--page-size",
+    "100",
+  ]);
+  const rawCalendars = payload?.data?.calendar_list || payload?.calendar_list || [];
+  const calendars = rawCalendars
+    .map(normalizeLarkCalendar)
+    .filter((calendar) => calendar.id && calendar.name);
+  const primary = await fetchPrimaryCalendar();
+  if (primary.id && !calendars.some((calendar) => calendar.id === primary.id)) {
+    calendars.unshift({
+      id: primary.id,
+      name: primary.summary || "主日历",
+      type: "primary",
+      role: "owner",
+      permissions: "",
+    });
+  }
+
+  return {
+    ok: true,
+    calendars,
+    primaryCalendarId: primary.id,
+    primaryCalendarName: primary.summary,
+  };
+}
+
+function normalizeLarkCalendar(calendar = {}) {
+  return {
+    id: optionalString(calendar.calendar_id || calendar.id),
+    name: optionalString(calendar.summary_alias || calendar.summary || calendar.name),
+    type: optionalString(calendar.type),
+    role: optionalString(calendar.role),
+    permissions: optionalString(calendar.permissions),
   };
 }
 
@@ -1577,11 +1641,15 @@ async function deleteLarkEvent(topic) {
 }
 
 async function deleteSyncedCalendarEvent(topic) {
+  const provider = optionalString(topic.calendar_provider);
   if (topic.lark_event_id) {
     await deleteLarkEvent(topic);
   }
   if (topic.macos_event_id) {
     await deleteMacOSCalendarEvent(topic.macos_event_id);
+  }
+  if (provider === "macos") {
+    await deleteMacOSCalendarEventsForTopic(topic.topic_id);
   }
 
   topic.calendar_provider = "none";
@@ -1663,13 +1731,22 @@ async function deleteMacOSCalendarEventsForTopic(topicId) {
   if (!normalizedTopicId) return;
   const script = `
 tell application id "com.apple.iCal"
-  set targetNeedle to "topic_id: " & ${toAppleScriptString(normalizedTopicId)}
+  set targetLine to "topic_id: " & ${toAppleScriptString(normalizedTopicId)}
   set deletedCount to 0
   repeat with candidateCalendar in calendars
-    set matchingEvents to every event of candidateCalendar whose description contains targetNeedle
+    set matchingEvents to every event of candidateCalendar whose description contains targetLine
     repeat with candidateEvent in matchingEvents
-      delete candidateEvent
-      set deletedCount to deletedCount + 1
+      set shouldDelete to false
+      repeat with descriptionLine in paragraphs of (description of candidateEvent)
+        if (descriptionLine as text) is targetLine then
+          set shouldDelete to true
+          exit repeat
+        end if
+      end repeat
+      if shouldDelete is true then
+        delete candidateEvent
+        set deletedCount to deletedCount + 1
+      end if
     end repeat
   end repeat
   return deletedCount as string
@@ -1957,6 +2034,12 @@ function isNetworkError(error) {
   return /ENOTFOUND|ECONNRESET|ECONNREFUSED|ETIMEDOUT|network|timeout|TLS|EAI_AGAIN|网络/i.test(message);
 }
 
+function formatCalendarSyncError(error) {
+  const message = optionalString(error?.message);
+  if (!message) return "未知错误";
+  return message.replace(/\s+/g, " ").slice(0, 240);
+}
+
 function extractUserCode(verificationUrl) {
   try {
     const url = new URL(verificationUrl);
@@ -2094,9 +2177,52 @@ function normalizeTimeString(value) {
   return /^\d{2}:\d{2}$/.test(text) ? text : "";
 }
 
-function toEpochSeconds(date, time) {
-  const iso = `${date}T${time}:00+08:00`;
-  return Math.floor(new Date(iso).getTime() / 1000);
+function toEpochSeconds(date, time, timeZone = TIMEZONE) {
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  const baseUtc = Date.UTC(year, month - 1, day, hour, minute, 0);
+  let resolvedUtc = baseUtc;
+
+  for (let index = 0; index < 3; index += 1) {
+    const offset = getTimeZoneOffsetMs(new Date(resolvedUtc), timeZone);
+    const nextUtc = baseUtc - offset;
+    if (nextUtc === resolvedUtc) break;
+    resolvedUtc = nextUtc;
+  }
+
+  return Math.floor(resolvedUtc / 1000);
+}
+
+function getTimeZoneOffsetMs(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const zonedAsUtc = Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+    Number(values.hour),
+    Number(values.minute),
+    Number(values.second),
+  );
+  return zonedAsUtc - date.getTime();
+}
+
+function normalizeTimeZone(value) {
+  const candidate = optionalString(value) || "UTC";
+  try {
+    return Intl.DateTimeFormat(undefined, { timeZone: candidate }).resolvedOptions().timeZone;
+  } catch {
+    return "UTC";
+  }
 }
 
 function normalizeCalendarProvider(value) {

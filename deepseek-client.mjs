@@ -1,5 +1,5 @@
 const DEEPSEEK_ENDPOINT = "https://api.deepseek.com/chat/completions";
-const DEEPSEEK_MODEL = "deepseek-chat";
+const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || "deepseek-v4-flash";
 
 function getDeepSeekApiKey(env = process.env) {
   return String(env.DEEPSEEK_API_KEY || "").trim();
@@ -43,7 +43,7 @@ function parseMergeSuggestion(text, topicCount) {
     .filter((group) => group.indexes.length >= 2);
 }
 
-async function suggestMergeGroups({ topics, env = process.env, fetchImpl = fetch, timeoutMs = 30_000 }) {
+async function suggestMergeGroups({ topics, env = process.env, fetchImpl = fetch, timeoutMs = 90_000 }) {
   const apiKey = getDeepSeekApiKey(env);
   if (!apiKey) {
     const error = new Error("未配置 DEEPSEEK_API_KEY,AI 建议分组不可用;仍可手动勾选合并。");
@@ -68,12 +68,15 @@ async function suggestMergeGroups({ topics, env = process.env, fetchImpl = fetch
         model: DEEPSEEK_MODEL,
         messages: [{ role: "user", content: buildMergeSuggestionPrompt(topics) }],
         temperature: 0.1,
-        max_tokens: 1000,
+        // v4-flash 是推理模型,reasoning 也计入 max_tokens;给太小会把
+        // 最终 JSON 挤没(content 为空),所以留足余量。
+        max_tokens: 8000,
       }),
       signal: controller.signal,
     });
   } catch (cause) {
-    const error = new Error(`DeepSeek 请求失败: ${cause?.message || cause};仍可手动勾选合并。`);
+    const detail = cause?.cause?.message || cause?.message || String(cause);
+    const error = new Error(`DeepSeek 请求失败: ${detail};仍可手动勾选合并。`);
     error.statusCode = 502;
     throw error;
   } finally {
@@ -88,7 +91,17 @@ async function suggestMergeGroups({ topics, env = process.env, fetchImpl = fetch
   }
 
   const payload = await response.json();
-  const content = payload?.choices?.[0]?.message?.content;
+  const choice = payload?.choices?.[0];
+  const content = choice?.message?.content;
+  if (!String(content || "").trim()) {
+    const error = new Error(
+      choice?.finish_reason === "length"
+        ? "DeepSeek 输出被截断(推理占满 max_tokens),请重试;仍可手动勾选合并。"
+        : "DeepSeek 返回了空内容;仍可手动勾选合并。",
+    );
+    error.statusCode = 502;
+    throw error;
+  }
   return { groups: parseMergeSuggestion(content, topics.length) };
 }
 

@@ -15,6 +15,7 @@ function buildMergeSuggestionPrompt(topics) {
     "找出应该合并的组。只输出 JSON,不要解释,格式:",
     '{"groups":[{"indexes":[1,3,4],"reason":"都是微软小红书视频商单","suggestedTitle":"微软小红书视频"}]}',
     "规则:indexes 用上面列表的序号;单独成组的卡不要输出;没有可合并的组就输出 {\"groups\":[]}。",
+    "reason 必须具体:点名让这几张卡算同一选题的事件/产品/关键词,禁止“同一主题”“同一产品的不同来源”这类笼统说法。",
     "",
     "选题卡列表:",
     ...lines,

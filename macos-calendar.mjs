@@ -56,6 +56,42 @@ end tell
 `;
 }
 
+// 批量清理:多张卡的 UID 删除 + topic_id 兜底扫描合成一次 osascript,
+// 只遍历一遍日历,避免 N 张卡付 N 次进程启动 + Calendar.app IPC 的成本。
+function buildBatchCalendarCleanupScript({ eventUids = [], topicIds = [] } = {}) {
+  const uidList = eventUids.filter(Boolean).map(toAppleScriptString).join(", ");
+  const lineList = topicIds
+    .filter(Boolean)
+    .map((topicId) => toAppleScriptString(`topic_id: ${topicId}`))
+    .join(", ");
+  return `
+tell application id "com.apple.iCal"
+  set targetUids to {${uidList}}
+  set targetLines to {${lineList}}
+  set deletedCount to 0
+  repeat with candidateCalendar in calendars
+    repeat with targetUid in targetUids
+      set matchingEvents to every event of candidateCalendar whose uid is (targetUid as string)
+      repeat with candidateEvent in matchingEvents
+        delete candidateEvent
+        set deletedCount to deletedCount + 1
+      end repeat
+    end repeat
+    repeat with targetLine in targetLines
+      set matchingEvents to every event of candidateCalendar whose description contains (targetLine as string)
+      repeat with candidateEvent in matchingEvents
+        if (paragraphs of ((description of candidateEvent) as string)) contains (targetLine as string) then
+          delete candidateEvent
+          set deletedCount to deletedCount + 1
+        end if
+      end repeat
+    end repeat
+  end repeat
+  return deletedCount as string
+end tell
+`;
+}
+
 // 撤回排期/作废时的清理计划。纯函数,便于单测。
 // macos 兜底扫描的触发条件刻意收窄:只有卡片带过 macos 痕迹才全日历扫,
 // 纯 lark / none 用户不付这个成本。
@@ -78,6 +114,7 @@ function planCalendarCleanup(topic = {}) {
 
 export {
   buildAppleScriptDate,
+  buildBatchCalendarCleanupScript,
   buildDeleteEventsByTopicScript,
   planCalendarCleanup,
   toAppleScriptString,

@@ -73,6 +73,7 @@ const elements = {
   backlogPageSize: document.querySelector("#backlogPageSize"),
   backlogHint: document.querySelector("#backlogHint"),
   mergeSelectedBtn: document.querySelector("#mergeSelectedBtn"),
+  batchDeleteBtn: document.querySelector("#batchDeleteBtn"),
   aiSuggestMergeBtn: document.querySelector("#aiSuggestMergeBtn"),
   mergeInfo: document.querySelector("#mergeInfo"),
   mergeSuggestions: document.querySelector("#mergeSuggestions"),
@@ -245,6 +246,7 @@ function bindEvents() {
   });
 
   elements.mergeSelectedBtn?.addEventListener("click", handleMergeSelected);
+  elements.batchDeleteBtn?.addEventListener("click", handleBatchDelete);
   elements.aiSuggestMergeBtn?.addEventListener("click", handleSuggestMergeGroups);
 
   elements.inboxPrevBtn?.addEventListener("click", () => {
@@ -673,11 +675,16 @@ function renderMacOSCalendarSelect() {
 }
 
 function renderBacklog() {
-  const topics = filteredBacklog();
-  const totalPages = Math.max(1, Math.ceil(topics.length / state.backlogPageSize));
+  const suggestionsActive = state.mergeSuggestions.length > 0;
+  // 建议分组激活时临时铺开全部卡片并按组排序,避免组员被分页藏在别的页里。
+  const topics = suggestionsActive
+    ? orderTopicsByMergeGroup(filteredBacklog())
+    : filteredBacklog();
+  const pageSize = suggestionsActive ? Math.max(topics.length, 1) : state.backlogPageSize;
+  const totalPages = Math.max(1, Math.ceil(topics.length / pageSize));
   const currentPage = Math.min(state.backlogPage, totalPages);
-  const startIndex = topics.length === 0 ? 0 : (currentPage - 1) * state.backlogPageSize;
-  const visibleTopics = topics.slice(startIndex, startIndex + state.backlogPageSize);
+  const startIndex = topics.length === 0 ? 0 : (currentPage - 1) * pageSize;
+  const visibleTopics = topics.slice(startIndex, startIndex + pageSize);
 
   state.backlogPage = currentPage;
   elements.backlogPrevBtn.disabled = currentPage === 1 || topics.length === 0;
@@ -686,8 +693,9 @@ function renderBacklog() {
   elements.backlogWindowInfo.textContent = topics.length
     ? `当前显示 ${startIndex + 1}-${startIndex + visibleTopics.length} / ${topics.length}`
     : "当前显示 0 / 0";
-  elements.backlogHint.textContent =
-    state.recentTopicPaths.length
+  elements.backlogHint.textContent = suggestionsActive
+    ? "AI 建议分组中:已临时显示全部卡片,组号颜色和下方建议一一对应。"
+    : state.recentTopicPaths.length
       ? "最近转入的卡片已置顶；确认后再拖进日历。"
       : "筛选后挑一张，拖到右侧周历。";
 
@@ -718,15 +726,33 @@ function renderBacklog() {
   renderMergeToolbar();
 }
 
+function getMergeGroupIndex(topicPath) {
+  return state.mergeSuggestions.findIndex((group) =>
+    (group.topics || []).some((topic) => topic.path === topicPath),
+  );
+}
+
+function orderTopicsByMergeGroup(topics) {
+  const UNGROUPED = 1_000_000;
+  return [...topics].sort((left, right) => {
+    const leftGroup = getMergeGroupIndex(left.path);
+    const rightGroup = getMergeGroupIndex(right.path);
+    return (leftGroup === -1 ? UNGROUPED : leftGroup) - (rightGroup === -1 ? UNGROUPED : rightGroup);
+  });
+}
+
 function renderMergeToolbar() {
   if (!elements.mergeInfo) return;
   const count = state.mergeSelection.size;
   elements.mergeSelectedBtn.disabled = state.mergeSubmitting || count < 2;
+  if (elements.batchDeleteBtn) {
+    elements.batchDeleteBtn.disabled = state.mergeSubmitting || count < 1;
+  }
   elements.aiSuggestMergeBtn.disabled = state.mergeSuggesting;
   elements.aiSuggestMergeBtn.textContent = state.mergeSuggesting ? "AI 分析中…" : "AI 建议分组";
   elements.mergeInfo.textContent = count
-    ? `已选 ${count} 张;先勾的做主卡`
-    : "勾选同一选题的卡;先勾的做主卡";
+    ? `已选 ${count} 张;合并时先勾的做主卡`
+    : "勾选卡片后可合并或批量删除;合并时先勾的做主卡";
 
   const box = elements.mergeSuggestions;
   box.replaceChildren();
@@ -735,21 +761,74 @@ function renderMergeToolbar() {
     return;
   }
   box.hidden = false;
+
+  const head = document.createElement("div");
+  head.className = "merge-suggestions-head";
+  const headText = document.createElement("span");
+  headText.textContent = `AI 找到 ${state.mergeSuggestions.length} 组疑似同选题的卡`;
+  const closeBtn = document.createElement("button");
+  closeBtn.type = "button";
+  closeBtn.className = "mini-btn";
+  closeBtn.textContent = "关闭建议";
+  closeBtn.addEventListener("click", () => {
+    state.mergeSuggestions = [];
+    state.mergeSelection = new Set();
+    renderBacklog();
+  });
+  head.append(headText, closeBtn);
+  box.append(head);
+
   state.mergeSuggestions.forEach((group, index) => {
-    const row = document.createElement("div");
-    row.className = "merge-suggestion-row";
+    const groupBox = document.createElement("div");
+    groupBox.className = `merge-suggestion-group merge-group-${index % 5}`;
+
+    const header = document.createElement("div");
+    header.className = "merge-suggestion-header";
+    const badge = document.createElement("span");
+    badge.className = "merge-group-badge";
+    badge.textContent = `组 ${index + 1}`;
+    const title = document.createElement("strong");
+    title.textContent = stripTopicPrefix(group.suggestedTitle || group.topics[0].title);
+    header.append(badge, title);
+    groupBox.append(header);
+
+    if (group.reason) {
+      const reason = document.createElement("p");
+      reason.className = "merge-suggestion-reason";
+      reason.textContent = group.reason;
+      groupBox.append(reason);
+    }
+
+    const members = document.createElement("ul");
+    members.className = "merge-suggestion-members";
+    for (const topic of group.topics) {
+      const item = document.createElement("li");
+      item.textContent = stripTopicPrefix(topic.title);
+      members.append(item);
+    }
+    groupBox.append(members);
+
+    const actions = document.createElement("div");
+    actions.className = "merge-suggestion-actions";
     const pick = document.createElement("button");
     pick.type = "button";
     pick.className = "mini-btn";
-    pick.textContent = `选第 ${index + 1} 组(${group.topics.length} 张)`;
+    pick.textContent = `勾选这 ${group.topics.length} 张`;
     pick.addEventListener("click", () => {
       state.mergeSelection = new Set(group.topics.map((topic) => topic.path));
       renderBacklog();
     });
-    const desc = document.createElement("span");
-    desc.textContent = `${group.suggestedTitle || group.topics[0].title}${group.reason ? ` — ${group.reason}` : ""}`;
-    row.append(pick, desc);
-    box.append(row);
+    const mergeNow = document.createElement("button");
+    mergeNow.type = "button";
+    mergeNow.className = "mini-btn accent-btn";
+    mergeNow.textContent = "合并这组";
+    mergeNow.addEventListener("click", () => {
+      state.mergeSelection = new Set(group.topics.map((topic) => topic.path));
+      handleMergeSelected();
+    });
+    actions.append(pick, mergeNow);
+    groupBox.append(actions);
+    box.append(groupBox);
   });
 }
 
@@ -790,8 +869,7 @@ async function handleSuggestMergeGroups() {
     if (!state.mergeSuggestions.length) {
       showToast("AI 没有发现可合并的同选题卡");
     } else {
-      state.mergeSelection = new Set(state.mergeSuggestions[0].topics.map((topic) => topic.path));
-      showToast(`AI 建议 ${state.mergeSuggestions.length} 组,已预勾第 1 组,请确认后点合并`);
+      showToast(`AI 找到 ${state.mergeSuggestions.length} 组,组内成员和理由在下方,确认后再合并`);
     }
   } catch (error) {
     showToast(`AI 建议不可用:${error.message}`);
@@ -1045,8 +1123,16 @@ function createTopicCard(topic, options = {}) {
       renderMergeToolbar();
     });
     const label = document.createElement("span");
-    label.textContent = "同选题";
+    label.textContent = "选择";
     selectLine.append(checkbox, label);
+    const groupIndex = getMergeGroupIndex(topic.path);
+    if (groupIndex >= 0) {
+      const badge = document.createElement("span");
+      badge.className = "merge-group-badge";
+      badge.textContent = `组 ${groupIndex + 1}`;
+      selectLine.append(badge);
+      card.classList.add("merge-group-card", `merge-group-${groupIndex % 5}`);
+    }
     card.prepend(selectLine);
   }
   if (!options.compact && !options.calendar && state.recentTopicPaths.includes(topic.path)) {
@@ -1320,14 +1406,27 @@ function setScheduleSubmitting(isSubmitting) {
   elements.scheduleSubmitBtn.textContent = state.scheduleSubmitting ? "保存中…" : "保存排期";
 }
 
-function openDisposeDialog(topic) {
-  state.disposeTarget = topic;
-  elements.disposeTitle.textContent = `处理：${topic.title}`;
-  elements.disposeAction.value = "拒绝";
+function handleBatchDelete() {
+  const byPath = new Map(state.topics.map((topic) => [topic.path, topic]));
+  const topics = [...state.mergeSelection].map((topicPath) => byPath.get(topicPath)).filter(Boolean);
+  if (!topics.length) return;
+  openDisposeDialog(topics);
+}
+
+function openDisposeDialog(target) {
+  const isBatch = Array.isArray(target);
+  state.disposeTarget = target;
+  elements.disposeTitle.textContent = isBatch
+    ? `批量处理 ${target.length} 张卡`
+    : `处理：${target.title}`;
+  elements.disposeAction.value = isBatch ? "过期归档" : "拒绝";
   elements.disposeReason.value = "";
   elements.disposeReasonChips?.querySelectorAll(".reason-chip").forEach((btn) => btn.classList.remove("is-active"));
-  elements.disposeSync.checked = Boolean(topic.larkEventId || topic.macosEventId);
-  elements.disposeSync.disabled = !(topic.larkEventId || topic.macosEventId);
+  const hasExternalEvent = isBatch
+    ? target.some((topic) => topic.larkEventId || topic.macosEventId)
+    : Boolean(target.larkEventId || target.macosEventId);
+  elements.disposeSync.checked = hasExternalEvent;
+  elements.disposeSync.disabled = !hasExternalEvent;
   renderDisposeActionHint();
   elements.disposeDialog.showModal();
 }
@@ -1335,8 +1434,11 @@ function openDisposeDialog(topic) {
 function renderDisposeActionHint() {
   if (!elements.disposeActionHint) return;
   const action = elements.disposeAction?.value || "拒绝";
-  const topic = state.disposeTarget;
-  const hasInboxSource = Boolean(topic?.sourceInboxPath);
+  const target = state.disposeTarget;
+  const isBatch = Array.isArray(target);
+  const hasInboxSource = isBatch
+    ? target.some((topic) => topic?.sourceInboxPath)
+    : Boolean(target?.sourceInboxPath);
   if (action === "拒绝") {
     elements.disposeActionHint.className = "dispose-action-hint";
     elements.disposeActionHint.innerHTML = `
@@ -1346,10 +1448,16 @@ function renderDisposeActionHint() {
     return;
   }
 
+  const batchInboxNote = hasInboxSource
+    ? "其中关联了收件箱来源的卡，原始素材也会从 Vault 删除。"
+    : "这批卡没有关联原始收件箱素材，因此只移动行动卡片。";
+  const singleInboxNote = hasInboxSource
+    ? `关联的原始收件箱素材「${escapeHtml(isBatch ? "" : target.sourceInboxPath)}」也会从 Vault 删除。`
+    : "这张卡没有关联原始收件箱素材，因此只移动行动卡片。";
   elements.disposeActionHint.className = "dispose-action-hint is-danger";
   elements.disposeActionHint.innerHTML = `
-    <strong>会从活动区移走</strong>
-    <span>行动卡片会移动到「${escapeHtml(state.settings?.archiveDir || "归档目录")}」。${hasInboxSource ? `关联的原始收件箱素材「${escapeHtml(topic.sourceInboxPath)}」也会从 Vault 删除。` : "这张卡没有关联原始收件箱素材，因此只移动行动卡片。"}这不是移到系统废纸篓。</span>
+    <strong>${isBatch ? `会把 ${target.length} 张卡从活动区移走` : "会从活动区移走"}</strong>
+    <span>行动卡片会移动到「${escapeHtml(state.settings?.archiveDir || "归档目录")}」。${isBatch ? batchInboxNote : singleInboxNote}这不是移到系统废纸篓。</span>
   `;
 }
 
@@ -1360,6 +1468,25 @@ async function submitDispose(event) {
   const reason = elements.disposeReason.value.trim();
   if (!reason) {
     alert("原因不能为空");
+    return;
+  }
+
+  if (Array.isArray(state.disposeTarget)) {
+    const data = await postAndReload("/api/topics/dispose-batch", {
+      paths: state.disposeTarget.map((topic) => topic.path),
+      action: elements.disposeAction.value,
+      reason,
+      removeFromCalendar: elements.disposeSync.checked,
+    });
+    if (!data) return;
+    state.mergeSelection = new Set();
+    elements.disposeDialog.close();
+    const failedNote = data.failed?.length ? `,失败 ${data.failed.length} 张` : "";
+    const calendarNote = data.calendarWarnings?.length
+      ? `;日历清理警告 ${data.calendarWarnings.length} 条`
+      : "";
+    showToast(`已批量处理 ${data.disposed?.length ?? 0} 张卡${failedNote}${calendarNote}`);
+    renderBacklog();
     return;
   }
 

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildBatchCalendarCleanupScript,
   buildDeleteEventsByTopicScript,
   planCalendarCleanup,
   toAppleScriptString,
@@ -62,4 +63,30 @@ test('planCalendarCleanup does not sweep macos calendars for lark-only cards', (
 test('planCalendarCleanup returns nothing for never-synced cards', () => {
   assert.deepEqual(planCalendarCleanup({ topic_id: 'topic-1', calendar_provider: 'none' }), []);
   assert.deepEqual(planCalendarCleanup({}), []);
+});
+
+test('buildBatchCalendarCleanupScript merges uids and topic sweeps into one script', () => {
+  const script = buildBatchCalendarCleanupScript({
+    eventUids: ['uid-1', 'uid-2'],
+    topicIds: ['topic-1'],
+  });
+  assert.ok(script.includes('set targetUids to {"uid-1", "uid-2"}'));
+  assert.ok(script.includes('set targetLines to {"topic_id: topic-1"}'));
+  assert.ok(script.includes('whose uid is (targetUid as string)'));
+  assert.ok(script.includes('paragraphs of ((description of candidateEvent) as string)) contains (targetLine as string)'));
+});
+
+test('buildBatchCalendarCleanupScript escapes quotes and drops empty entries', () => {
+  const script = buildBatchCalendarCleanupScript({
+    eventUids: ['a"b', '', null],
+    topicIds: ['', 'x\\y'],
+  });
+  assert.ok(script.includes('set targetUids to {"a\\"b"}'));
+  assert.ok(script.includes('set targetLines to {"topic_id: x\\\\y"}'));
+});
+
+test('buildBatchCalendarCleanupScript tolerates empty input', () => {
+  const script = buildBatchCalendarCleanupScript();
+  assert.ok(script.includes('set targetUids to {}'));
+  assert.ok(script.includes('set targetLines to {}'));
 });

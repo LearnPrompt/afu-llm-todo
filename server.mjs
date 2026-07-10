@@ -9,6 +9,7 @@ import { buildTopicDraftFromInbox, deriveInboxCandidate } from "./inbox-import.m
 import { suggestMergeGroups } from "./deepseek-client.mjs";
 import {
   buildAppleScriptDate,
+  buildBatchCalendarCleanupScript,
   buildDeleteEventsByTopicScript,
   planCalendarCleanup,
   toAppleScriptString,
@@ -157,6 +158,11 @@ createServer(async (req, res) => {
     if (url.pathname === "/api/topics/disposition" && req.method === "POST") {
       const body = await readJsonBody(req);
       return respondJson(res, await withTopicMutationLock(body.path, () => disposeTopic(body)));
+    }
+
+    if (url.pathname === "/api/topics/dispose-batch" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      return respondJson(res, await disposeTopicsBatch(body));
     }
 
     if (url.pathname === "/api/topics/revert-import" && req.method === "POST") {
@@ -1217,7 +1223,7 @@ async function unscheduleTopic(payload) {
   return { ok: true, topic: await readTopic(filePath) };
 }
 
-async function disposeTopic(payload) {
+async function disposeTopic(payload, options = {}) {
   const filePath = await resolveTopicPath(payload.path);
   const action = optionalString(payload.action);
   const reason = optionalString(payload.reason);
@@ -1234,8 +1240,16 @@ async function disposeTopic(payload) {
   const title = extractTitle(source.body, path.basename(filePath, ".md"));
   const topic = normalizeTopic(source.frontmatter, title, source.relPath);
 
-  if (removeFromCalendar) {
+  if (removeFromCalendar && !options.skipCalendarCleanup) {
     await deleteSyncedCalendarEvent(topic);
+  } else if (removeFromCalendar && options.skipCalendarCleanup) {
+    // 批量流程已在外层统一清理日历事件,这里只同步清掉卡上的引用字段。
+    topic.calendar_provider = "none";
+    topic.calendar_sync_status = "未同步";
+    topic.lark_event_id = "";
+    topic.lark_calendar_id = "";
+    topic.macos_event_id = "";
+    topic.macos_calendar_name = "";
   }
 
   topic.drop_action = action;
@@ -1284,6 +1298,62 @@ async function disposeTopic(payload) {
     archived: true,
     archivePath: path.relative((await getPlannerPaths()).vaultRoot, archivePath),
   };
+}
+
+// 批量作废:先把所有卡的日历事件合成一次 osascript 清掉,再逐卡走 disposeTopic 落盘,
+// 单卡失败不挡整批,失败项带原因返回给前端。
+async function disposeTopicsBatch(payload) {
+  const relPaths = normalizeArray(payload.paths);
+  if (!relPaths.length) {
+    throw badRequest("必须提供要处理的卡片");
+  }
+  const action = optionalString(payload.action);
+  const reason = optionalString(payload.reason);
+  if (!action) throw badRequest("必须提供作废动作");
+  if (!reason) throw badRequest("必须填写作废原因");
+  const removeFromCalendar = Boolean(payload.removeFromCalendar);
+
+  let calendarWarnings = [];
+  if (removeFromCalendar) {
+    const entries = [];
+    for (const relPath of relPaths) {
+      try {
+        const filePath = await resolveTopicPath(relPath);
+        const source = await loadTopicSource(filePath);
+        const title = extractTitle(source.body, path.basename(filePath, ".md"));
+        entries.push({ topic: normalizeTopic(source.frontmatter, title, source.relPath), title });
+      } catch {
+        // 读取失败的卡留给下面 disposeTopic 报错,不在这里中断日历清理。
+      }
+    }
+    calendarWarnings = await deleteSyncedCalendarEventsBatch(entries);
+  }
+
+  const disposed = [];
+  const failed = [];
+  for (const relPath of relPaths) {
+    try {
+      await withTopicMutationLock(relPath, () =>
+        disposeTopic(
+          { path: relPath, action, reason, removeFromCalendar },
+          { skipCalendarCleanup: true },
+        ),
+      );
+      disposed.push(relPath);
+    } catch (error) {
+      failed.push({ path: relPath, error: error.message });
+    }
+  }
+
+  await appendPlannerLog("topic-disposition-batch", `${disposed.length} 张卡`, {
+    action,
+    reason,
+    disposedCount: String(disposed.length),
+    failedCount: String(failed.length),
+    removeFromCalendar: String(removeFromCalendar),
+  });
+
+  return { ok: true, disposed, failed, calendarWarnings };
 }
 
 async function revertImportedTopic(payload) {
@@ -1763,14 +1833,18 @@ async function deleteLarkEvent(topic) {
 }
 
 async function deleteSyncedCalendarEvent(topic) {
+  let uidDeleteResult = "";
   for (const action of planCalendarCleanup(topic)) {
     if (action.type === "lark") {
       await deleteLarkEvent(topic);
     } else if (action.type === "macos-uid") {
-      await deleteMacOSCalendarEvent(action.eventUid);
+      uidDeleteResult = await deleteMacOSCalendarEvent(action.eventUid);
     } else if (action.type === "macos-topic-sweep") {
       // UID 可能因手工编辑/同步冲突丢失,按 topic_id 兜底清扫,避免日历攒重复日程。
-      await deleteMacOSCalendarEventsForTopic(action.topicId);
+      // UID 精确命中时事件已删,跳过全量扫描,省一整个 osascript 进程 + Calendar 遍历。
+      if (uidDeleteResult !== "deleted") {
+        await deleteMacOSCalendarEventsForTopic(action.topicId);
+      }
     }
   }
 
@@ -1780,6 +1854,41 @@ async function deleteSyncedCalendarEvent(topic) {
   topic.lark_calendar_id = "";
   topic.macos_event_id = "";
   topic.macos_calendar_name = "";
+}
+
+// 批量作废时的日历清理:所有卡的 UID 删除 + 兜底扫描合成一次 osascript,
+// lark 事件仍逐个走 API。返回逐卡警告,不让单卡失败挡住整批。
+async function deleteSyncedCalendarEventsBatch(entries) {
+  const warnings = [];
+  const eventUids = [];
+  const topicIds = [];
+
+  for (const { topic, title } of entries) {
+    for (const action of planCalendarCleanup(topic)) {
+      if (action.type === "lark") {
+        try {
+          await deleteLarkEvent(topic);
+        } catch (error) {
+          warnings.push(`${title}: ${formatCalendarSyncError(error)}`);
+        }
+      } else if (action.type === "macos-uid") {
+        eventUids.push(action.eventUid);
+      } else if (action.type === "macos-topic-sweep") {
+        topicIds.push(action.topicId);
+      }
+    }
+  }
+
+  if (eventUids.length || topicIds.length) {
+    try {
+      const script = buildBatchCalendarCleanupScript({ eventUids, topicIds });
+      await execText("osascript", ["-e", script], { timeoutMs: 120_000 });
+    } catch (error) {
+      warnings.push(`macOS 日历批量清理失败: ${formatCalendarSyncError(error)}`);
+    }
+  }
+
+  return warnings;
 }
 
 async function deleteCalendarEventsExcept(topic, provider) {
@@ -1831,7 +1940,7 @@ end tell
 }
 
 async function deleteMacOSCalendarEvent(eventUid) {
-  if (!eventUid) return;
+  if (!eventUid) return "missing";
   const script = `
 tell application id "com.apple.iCal"
   set targetUid to ${toAppleScriptString(eventUid)}
@@ -1845,7 +1954,8 @@ tell application id "com.apple.iCal"
   return "missing"
 end tell
 `;
-  await execText("osascript", ["-e", script], { timeoutMs: 60_000 });
+  const result = await execText("osascript", ["-e", script], { timeoutMs: 60_000 });
+  return optionalString(result);
 }
 
 async function deleteMacOSCalendarEventsForTopic(topicId) {

@@ -1959,16 +1959,86 @@ button:disabled {
 .merge-suggestions {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 10px;
-  border: 1px dashed var(--line);
+  gap: 8px;
+  grid-column: 1 / -1;
+  width: 100%;
+  flex-basis: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
   border-radius: var(--radius-md);
+  background: var(--panel, transparent);
 }
 
-.merge-suggestion-row {
+.merge-suggestions-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+/* 每组一个固定色相,建议块、卡片徽章、卡片左边线共用,肉眼即可对上号 */
+.merge-group-0 { --group-accent: #b6522d; }
+.merge-group-1 { --group-accent: #1e6a36; }
+.merge-group-2 { --group-accent: #2d5eb6; }
+.merge-group-3 { --group-accent: #8a3fa0; }
+.merge-group-4 { --group-accent: #8f6a12; }
+
+.merge-suggestion-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--group-accent, var(--line));
+  border-radius: var(--radius-md);
+  font-size: 0.82rem;
+}
+
+.merge-suggestion-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.82rem;
+}
+
+.merge-group-badge {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border: 1px solid var(--group-accent, var(--line));
+  border-radius: var(--radius-md);
+  color: var(--group-accent, var(--muted));
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.6;
+}
+
+.merge-suggestion-reason {
+  margin: 0;
   color: var(--muted);
 }
+
+.merge-suggestion-members {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.merge-suggestion-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.merge-group-card {
+  border-left: 3px solid var(--group-accent, var(--line));
+}
+
+.danger-ghost-btn:not(:disabled) {
+  color: #8f1d12;
+  border-color: #8f1d12;
+}
+

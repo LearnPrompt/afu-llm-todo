@@ -11,6 +11,8 @@
 [![Release](https://img.shields.io/github/v/release/LearnPrompt/afu-llm-todo)](https://github.com/LearnPrompt/afu-llm-todo/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+> **Fork 改动记录：** [个人 fork 相对上游 v1.3.4 的完整差异](docs/yc-main-change-record-2026-07-01.md)
+
 ![Afu hero](docs/assets/afu-hero.png)
 
 ## 演示视频

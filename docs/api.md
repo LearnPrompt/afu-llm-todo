@@ -28,6 +28,7 @@ Wiki Mode：
 
 - `GET /api/settings`
 - `POST /api/settings`
+- `POST /api/system/select-directory`，仅允许本机调用；在 macOS 打开原生文件夹选择器。独立模式返回绝对路径；Obsidian 模式的子目录会校验位于 Vault 内并返回相对路径
 
 飞书日历创建使用：
 

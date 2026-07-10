@@ -95,23 +95,76 @@
                   <span>独立模式（不用 Obsidian）</span>
                 </label>
               </div>
-              <label id="vaultRootLabel">
-                Vault 根目录
-                <input id="plannerVaultRoot" type="text" placeholder="/Users/you/ObsidianVault" />
-              </label>
+              <div id="vaultRootLabel" class="directory-field">
+                <label for="plannerVaultRoot">Vault 根目录</label>
+                <div class="directory-picker-control">
+                  <input id="plannerVaultRoot" type="text" placeholder="选择 Vault 文件夹" />
+                  <button class="directory-picker-btn" type="button" data-directory-picker="vault" aria-label="选择 Vault 根目录" title="选择 Vault 根目录" hidden>
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="M3 14V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H19a2 2 0 0 1 2 2v2" />
+                      <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-1.93-2.52L3 14Z" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
               <div class="settings-grid">
-                <label>
-                  选题目录
-                  <input id="plannerTopicDir" type="text" placeholder="15_自媒体/选题库" required />
-                </label>
-                <label>
-                  收件箱目录
-                  <input id="plannerInboxDir" type="text" placeholder="00_收件箱" required />
-                </label>
-                <label>
-                  归档目录
-                  <input id="plannerArchiveDir" type="text" placeholder="99_系统/归档/选题占位" required />
-                </label>
+                <div class="directory-field">
+                  <label for="plannerTopicDir">选题目录</label>
+                  <div class="directory-picker-control">
+                    <input id="plannerTopicDir" type="text" placeholder="15_自媒体/选题库" required />
+                    <button class="directory-picker-btn" type="button" data-directory-picker="topic" aria-label="选择选题目录" title="选择选题目录" hidden>
+                      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 14V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H19a2 2 0 0 1 2 2v2" />
+                        <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-1.93-2.52L3 14Z" />
+                      </svg>
+                    </button>
+                    <span class="directory-link-indicator" data-directory-link="topic" aria-label="根据 Vault 自动设置" title="根据 Vault 自动设置" hidden>
+                      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M9 17H7A5 5 0 0 1 7 7h2" />
+                        <path d="M15 7h2a5 5 0 1 1 0 10h-2" />
+                        <path d="M8 12h8" />
+                      </svg>
+                    </span>
+                  </div>
+                </div>
+                <div class="directory-field">
+                  <label for="plannerInboxDir">收件箱目录</label>
+                  <div class="directory-picker-control">
+                    <input id="plannerInboxDir" type="text" placeholder="00_收件箱" required />
+                    <button class="directory-picker-btn" type="button" data-directory-picker="inbox" aria-label="选择收件箱目录" title="选择收件箱目录" hidden>
+                      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 14V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H19a2 2 0 0 1 2 2v2" />
+                        <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-1.93-2.52L3 14Z" />
+                      </svg>
+                    </button>
+                    <span class="directory-link-indicator" data-directory-link="inbox" aria-label="根据 Vault 自动设置" title="根据 Vault 自动设置" hidden>
+                      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M9 17H7A5 5 0 0 1 7 7h2" />
+                        <path d="M15 7h2a5 5 0 1 1 0 10h-2" />
+                        <path d="M8 12h8" />
+                      </svg>
+                    </span>
+                  </div>
+                </div>
+                <div class="directory-field">
+                  <label for="plannerArchiveDir">归档目录</label>
+                  <div class="directory-picker-control">
+                    <input id="plannerArchiveDir" type="text" placeholder="99_系统/归档/选题占位" required />
+                    <button class="directory-picker-btn" type="button" data-directory-picker="archive" aria-label="选择归档目录" title="选择归档目录" hidden>
+                      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 14V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H19a2 2 0 0 1 2 2v2" />
+                        <path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-1.93-2.52L3 14Z" />
+                      </svg>
+                    </button>
+                    <span class="directory-link-indicator" data-directory-link="archive" aria-label="根据 Vault 自动设置" title="根据 Vault 自动设置" hidden>
+                      <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M9 17H7A5 5 0 0 1 7 7h2" />
+                        <path d="M15 7h2a5 5 0 1 1 0 10h-2" />
+                        <path d="M8 12h8" />
+                      </svg>
+                    </span>
+                  </div>
+                </div>
                 <label>
                   同步目标
                   <select id="plannerCalendarProvider">
@@ -146,10 +199,24 @@
                     </details>
                   </div>
                 </div>
-                <label>
-                  macOS 日历名
-                  <input id="plannerMacosCalendarName" type="text" placeholder="留空则使用第一个本地日历" />
+                <label id="plannerLarkCalendarField" hidden>
+                  飞书日历
+                  <select id="plannerLarkCalendarId">
+                    <option value="">选择同步到飞书后自动读取</option>
+                  </select>
+                  <span id="plannerLarkCalendarStatus" class="form-hint">选择排期要写入的飞书日历。</span>
                 </label>
+                <label id="plannerMacosCalendarField">
+                  macOS 日历名
+                  <select id="plannerMacosCalendarName">
+                    <option value="">选择同步到 macOS 后自动读取</option>
+                  </select>
+                  <span id="plannerMacosCalendarStatus" class="form-hint">只显示 Calendar.app 里可写入的日历。</span>
+                </label>
+              </div>
+              <div id="vaultLinkBanner" class="settings-diag-banner vault-link-banner" hidden>
+                <span id="vaultLinkMessage"></span>
+                <button id="configureVaultDirsBtn" class="mini-btn" type="button" hidden>重新配置目录</button>
               </div>
               <div class="settings-actions">
                 <button class="accent-btn" type="submit">保存目录设置</button>
@@ -272,7 +339,7 @@
             <p class="panel-tag">每日收件箱</p>
             <h3 id="dailyInboxTitle">处理当天收件箱</h3>
           </div>
-          <button class="ghost-btn" type="button" data-close="dailyInboxDialog">稍后</button>
+          <button class="icon-btn modal-close" type="button" data-close="dailyInboxDialog" aria-label="稍后处理">×</button>
         </div>
         <p id="dailyInboxSummary" class="daily-inbox-summary">正在检查当天候选。</p>
         <div id="dailyInboxList" class="daily-inbox-list"></div>
@@ -291,13 +358,13 @@
     </dialog>
 
     <dialog id="scheduleDialog" class="modal">
-      <form method="dialog" class="modal-card" id="scheduleForm">
+      <form method="dialog" class="modal-card schedule-card" id="scheduleForm">
         <div class="modal-head">
           <div>
             <p class="panel-tag">排期</p>
             <h3 id="scheduleTitle">排期选题</h3>
           </div>
-          <button class="ghost-btn" type="button" data-close="scheduleDialog">关闭</button>
+          <button class="icon-btn modal-close" type="button" data-close="scheduleDialog" aria-label="关闭排期弹窗">×</button>
         </div>
         <label>
           日期
@@ -329,7 +396,7 @@
         <div id="scheduleDaySidebar" class="schedule-day-sidebar"></div>
         <div class="modal-actions">
           <button class="ghost-btn" type="button" data-close="scheduleDialog">取消</button>
-          <button class="accent-btn" type="submit">保存排期</button>
+          <button id="scheduleSubmitBtn" class="accent-btn" type="submit">保存排期</button>
         </div>
       </form>
     </dialog>
@@ -341,15 +408,16 @@
             <p class="panel-tag">作废</p>
             <h3 id="disposeTitle">处理选题</h3>
           </div>
-          <button class="ghost-btn" type="button" data-close="disposeDialog">关闭</button>
+          <button class="icon-btn modal-close" type="button" data-close="disposeDialog" aria-label="关闭处理弹窗">×</button>
         </div>
         <label>
           动作
           <select id="disposeAction" required>
-            <option value="拒绝">拒绝但保留卡片</option>
-            <option value="过期归档">删除并移出活动选题库</option>
+            <option value="拒绝">标记拒绝，保留行动卡片</option>
+            <option value="过期归档">归档卡片，并删除原始素材</option>
           </select>
         </label>
+        <div id="disposeActionHint" class="dispose-action-hint"></div>
         <div class="field-label">原因</div>
         <div id="disposeReasonChips" class="dispose-reason-chips">
           <button type="button" class="reason-chip" data-reason="热点窗口已过">热点窗口已过</button>
@@ -385,7 +453,7 @@
             <p class="panel-tag">飞书授权</p>
             <h3>恢复日历同步</h3>
           </div>
-          <button class="ghost-btn" type="button" data-close="larkAuthDialog">关闭</button>
+          <button class="icon-btn modal-close" type="button" data-close="larkAuthDialog" aria-label="关闭飞书授权弹窗">×</button>
         </div>
         <p id="larkAuthMessage" class="auth-copy">
           页面会先打开飞书授权页。完成后，回来点“我已完成授权”。
@@ -399,6 +467,24 @@
         <p id="larkAuthExpires" class="auth-expire">授权会话将在 10 分钟后过期。</p>
         <div class="modal-actions">
           <button id="larkAuthCompleteBtn" class="accent-btn" type="button">我已完成授权</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="importResultDialog" class="modal">
+      <div class="modal-card import-result-card">
+        <div class="modal-head">
+          <div>
+            <p class="panel-tag">转卡完成</p>
+            <h3 id="importResultTitle">已转入排期池</h3>
+          </div>
+          <button class="icon-btn modal-close" type="button" data-close="importResultDialog" aria-label="关闭转卡结果">×</button>
+        </div>
+        <p id="importResultSummary" class="import-result-summary">新卡片已经创建。</p>
+        <div id="importResultList" class="import-result-list"></div>
+        <div class="modal-actions import-result-actions">
+          <button id="importResultBacklogBtn" class="ghost-btn" type="button">先放排期池</button>
+          <button id="importResultScheduleBtn" class="accent-btn" type="button">现在排期</button>
         </div>
       </div>
     </dialog>
@@ -419,6 +505,7 @@
         <div class="topic-actions">
           <button class="mini-btn" data-action="schedule" type="button">排期</button>
           <button class="mini-btn" data-action="unschedule" type="button">取消排期</button>
+          <button class="mini-btn" data-action="revert-import" type="button">撤回转卡</button>
           <button class="mini-btn" data-action="dispose" type="button">拒绝 / 删除</button>
         </div>
       </article>

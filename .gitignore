@@ -9,3 +9,6 @@ examples/sample-vault/topic-planner.config.json
 *.log
 *.tmp
 .gstack/
+
+# Private article drafts.
+docs/Afu.md

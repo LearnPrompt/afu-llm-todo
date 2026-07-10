@@ -8,7 +8,13 @@ import { fileURLToPath } from "node:url";
 import { buildTopicDraftFromInbox, deriveInboxCandidate } from "./inbox-import.mjs";
 import { appendOperationLog } from "./operation-log.mjs";
 import {
+  formatPlannerDirectorySelection,
+  resolvePlannerDirectoryPickerStart,
+  selectNativeDirectory,
+} from "./native-directory-picker.mjs";
+import {
   getPlannerConfigPath,
+  getVaultProfile,
   loadPlannerSettings,
   resolvePlannerPaths,
   savePlannerSettings,
@@ -28,7 +34,9 @@ const PROJECT_ROOT = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_ROOT, "public");
 const SAMPLE_VAULT_ROOT = path.join(PROJECT_ROOT, "examples", "sample-vault");
 const PORT = Number(process.env.PORT || 4317);
-const TIMEZONE = "Asia/Shanghai";
+const TIMEZONE = normalizeTimeZone(
+  process.env.TOPIC_PLANNER_TIME_ZONE || Intl.DateTimeFormat().resolvedOptions().timeZone,
+);
 const LARK_CLI_CANDIDATES = [
   process.env.LARK_CLI_PATH,
   process.env.HOME ? path.join(process.env.HOME, ".npm-global/bin/lark-cli") : "",
@@ -69,6 +77,7 @@ let authCache = { expiresAt: 0, value: null };
 let calendarCache = { expiresAt: 0, value: null };
 let authFlowCache = { expiresAt: 0, value: null };
 let plannerSettingsCache = null;
+const topicMutationLocks = new Map();
 
 createServer(async (req, res) => {
   try {
@@ -101,6 +110,12 @@ createServer(async (req, res) => {
       return respondJson(res, await savePlannerSettingsPayload(body));
     }
 
+    if (url.pathname === "/api/system/select-directory" && req.method === "POST") {
+      assertLocalRequest(req);
+      const body = await readJsonBody(req);
+      return respondJson(res, await selectPlannerDirectory(body));
+    }
+
     if (url.pathname === "/api/diagnostics" && req.method === "GET") {
       return respondJson(res, await buildDiagnosticsPayload());
     }
@@ -127,17 +142,22 @@ createServer(async (req, res) => {
 
     if (url.pathname === "/api/topics/schedule" && req.method === "POST") {
       const body = await readJsonBody(req);
-      return respondJson(res, await scheduleTopic(body));
+      return respondJson(res, await withTopicMutationLock(body.path, () => scheduleTopic(body)));
     }
 
     if (url.pathname === "/api/topics/disposition" && req.method === "POST") {
       const body = await readJsonBody(req);
-      return respondJson(res, await disposeTopic(body));
+      return respondJson(res, await withTopicMutationLock(body.path, () => disposeTopic(body)));
+    }
+
+    if (url.pathname === "/api/topics/revert-import" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      return respondJson(res, await withTopicMutationLock(body.path, () => revertImportedTopic(body)));
     }
 
     if (url.pathname === "/api/topics/unschedule" && req.method === "POST") {
       const body = await readJsonBody(req);
-      return respondJson(res, await unscheduleTopic(body));
+      return respondJson(res, await withTopicMutationLock(body.path, () => unscheduleTopic(body)));
     }
 
     if (url.pathname === "/api/lark/repair/start" && req.method === "POST") {
@@ -146,6 +166,14 @@ createServer(async (req, res) => {
 
     if (url.pathname === "/api/lark/repair/finish" && req.method === "POST") {
       return respondJson(res, await finishLarkAuthRepair());
+    }
+
+    if (url.pathname === "/api/lark/calendars" && req.method === "GET") {
+      return respondJson(res, await getLarkCalendarsPayload());
+    }
+
+    if (url.pathname === "/api/macos/calendars" && req.method === "GET") {
+      return respondJson(res, await getMacOSCalendarsPayload());
     }
 
     if (url.pathname === "/api/health" && req.method === "GET") {
@@ -167,6 +195,7 @@ async function buildTopicsPayload() {
   const settings = await getPlannerSettings();
   return {
     configPath: getPlannerConfigPath(PROJECT_ROOT),
+    hasSavedConfig: await plannerConfigExists(),
     workspace: settings.vaultRoot,
     generatedAt: new Date().toISOString(),
     timezone: TIMEZONE,
@@ -176,6 +205,20 @@ async function buildTopicsPayload() {
     inboxCandidates: inboxAnalysis.candidates,
     inboxSummary: inboxAnalysis.summary,
   };
+}
+
+async function withTopicMutationLock(topicPath, operation) {
+  const key = optionalString(topicPath) || "__unknown_topic__";
+  const previous = topicMutationLocks.get(key) || Promise.resolve();
+  const current = previous.catch(() => {}).then(operation);
+  topicMutationLocks.set(key, current);
+  try {
+    return await current;
+  } finally {
+    if (topicMutationLocks.get(key) === current) {
+      topicMutationLocks.delete(key);
+    }
+  }
 }
 
 async function buildInboxCandidatesPayload() {
@@ -193,30 +236,162 @@ async function getPlannerSettingsPayload() {
   return {
     ok: true,
     configPath: getPlannerConfigPath(PROJECT_ROOT),
+    hasSavedConfig: await plannerConfigExists(),
     settings,
   };
 }
 
 async function savePlannerSettingsPayload(payload) {
   const workspaceMode = payload.workspaceMode === 'standalone' ? 'standalone' : 'obsidian';
-  if (workspaceMode === 'obsidian' && !optionalString(payload.vaultRoot)) {
+  const requestedVaultRoot = optionalString(payload.vaultRoot);
+  if (workspaceMode === 'obsidian' && !requestedVaultRoot) {
     throw badRequest("Obsidian 模式必须填写 Vault 根目录");
+  }
+  if (workspaceMode === 'obsidian' && !path.isAbsolute(requestedVaultRoot)) {
+    throw badRequest("Obsidian 模式的 Vault 根目录必须是本机绝对路径");
   }
 
   if (isDemoConfigRun()) {
-    const requestedVaultRoot = path.resolve(optionalString(payload.vaultRoot));
-    if (requestedVaultRoot !== SAMPLE_VAULT_ROOT) {
+    const resolvedRequestedVaultRoot = path.resolve(requestedVaultRoot);
+    if (resolvedRequestedVaultRoot !== SAMPLE_VAULT_ROOT) {
       throw badRequest("当前 4317 运行在 Sample Vault 演示环境，不能把 demo 配置保存成真实 Vault。请切回真实服务后再保存真实路径。");
     }
   }
 
-  const settings = await savePlannerSettings(payload, { projectRoot: PROJECT_ROOT });
+  const currentSettings = await getPlannerSettings();
+  const vaultProfiles = { ...(currentSettings.vaultProfiles || {}) };
+  const hasPlannerConfig = await plannerConfigExists();
+  if (hasPlannerConfig && currentSettings.workspaceMode === "obsidian") {
+    const currentVaultRoot = path.resolve(currentSettings.vaultRoot);
+    vaultProfiles[currentVaultRoot] = {
+      ...(vaultProfiles[currentVaultRoot] || {}),
+      ...buildVaultProfileFromSettings(currentSettings),
+    };
+  }
+  const nextPayload = { ...payload, vaultProfiles };
+  if (workspaceMode === "obsidian") {
+    const vaultRoot = path.resolve(requestedVaultRoot);
+    const existingProfile = vaultProfiles[vaultRoot] || {};
+    const switchingVault = currentSettings.workspaceMode !== "obsidian"
+      || path.resolve(currentSettings.vaultRoot) !== vaultRoot;
+    const topicDir = validateVaultRelativeDirectory(payload.topicDir, "选题目录");
+    const inboxDir = validateVaultRelativeDirectory(payload.inboxDir, "收件箱目录");
+    const archiveDir = validateVaultRelativeDirectory(payload.archiveDir, "归档目录");
+    if (!topicDir || !inboxDir || !archiveDir) {
+      throw badRequest("首次使用这个 Vault 时，请先选择选题、收件箱和归档目录");
+    }
+    const profileWikiDir = optionalString(existingProfile.wikiDir);
+    const wikiDirSource = switchingVault && profileWikiDir
+      ? profileWikiDir
+      : (optionalString(payload.wikiDir) || profileWikiDir || currentSettings.wikiDir);
+    const wikiDir = validateVaultRelativeDirectory(wikiDirSource, "Wiki 目录");
+    const wikiIndexPath = validateVaultRelativeDirectory(
+      switchingVault && optionalString(existingProfile.wikiIndexPath)
+        ? existingProfile.wikiIndexPath
+        : (optionalString(payload.wikiIndexPath) || `${wikiDir}/index.md`),
+      "Wiki Index",
+    );
+    const wikiLogPath = validateVaultRelativeDirectory(
+      switchingVault && optionalString(existingProfile.wikiLogPath)
+        ? existingProfile.wikiLogPath
+        : (optionalString(payload.wikiLogPath) || `${wikiDir}/log.md`),
+      "Wiki Log",
+    );
+    nextPayload.vaultRoot = vaultRoot;
+    nextPayload.topicDir = topicDir;
+    nextPayload.inboxDir = inboxDir;
+    nextPayload.archiveDir = archiveDir;
+    nextPayload.wikiDir = wikiDir;
+    nextPayload.wikiIndexPath = wikiIndexPath;
+    nextPayload.wikiLogPath = wikiLogPath;
+    nextPayload.vaultProfiles[vaultRoot] = {
+      topicDir,
+      inboxDir,
+      archiveDir,
+      wikiDir,
+      wikiIndexPath,
+      wikiLogPath,
+    };
+  }
+
+  const settings = await savePlannerSettings(nextPayload, { projectRoot: PROJECT_ROOT });
   plannerSettingsCache = settings;
   resetRuntimeCaches();
   return {
     ok: true,
     configPath: getPlannerConfigPath(PROJECT_ROOT),
     settings,
+  };
+}
+
+function buildVaultProfileFromSettings(settings) {
+  return {
+    topicDir: settings.topicDir,
+    inboxDir: settings.inboxDir,
+    archiveDir: settings.archiveDir,
+    wikiDir: settings.wikiDir,
+    wikiIndexPath: settings.wikiIndexPath,
+    wikiLogPath: settings.wikiLogPath,
+  };
+}
+
+async function selectPlannerDirectory(payload) {
+  const prompts = {
+    vault: "选择 Obsidian Vault 根目录",
+    topic: "选择选题目录",
+    inbox: "选择收件箱目录",
+    archive: "选择归档目录",
+  };
+  const target = optionalString(payload.target);
+  if (!prompts[target]) {
+    throw badRequest("未知的目录类型");
+  }
+
+  const currentPath = optionalString(payload.currentPath);
+  const vaultRoot = optionalString(payload.vaultRoot);
+  if (currentPath.length > 4096 || vaultRoot.length > 4096) {
+    throw badRequest("目录路径过长");
+  }
+  const workspaceMode = payload.workspaceMode === "obsidian" ? "obsidian" : "standalone";
+  const pickerCurrentPath = resolvePlannerDirectoryPickerStart({
+    target,
+    currentPath,
+    vaultRoot,
+    workspaceMode,
+  });
+
+  const result = await selectNativeDirectory({
+    currentPath: pickerCurrentPath,
+    prompt: prompts[target],
+  });
+  if (result.canceled) {
+    return { ok: true, ...result };
+  }
+
+  if (target === "vault") {
+    const settings = await getPlannerSettings();
+    const profile = await plannerConfigExists() ? getVaultProfile(settings, result.path) : null;
+    return {
+      ok: true,
+      canceled: false,
+      path: result.path,
+      vault: {
+        vaultRoot: result.path,
+        configured: Boolean(profile),
+        directories: profile || { topicDir: "", inboxDir: "", archiveDir: "" },
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    canceled: false,
+    path: formatPlannerDirectorySelection({
+      target,
+      selectedPath: result.path,
+      vaultRoot,
+      workspaceMode,
+    }),
   };
 }
 
@@ -330,7 +505,13 @@ function resetRuntimeCaches() {
 
 async function listTopics() {
   const { topicDir } = await getPlannerPaths();
-  const entries = await fs.readdir(topicDir, { withFileTypes: true });
+  let entries = [];
+  try {
+    entries = await fs.readdir(topicDir, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
   const files = entries
     .filter((entry) => entry.isFile() && entry.name.endsWith(".md"))
     .filter((entry) => !["README.md", "00-AI工具选题索引.md"].includes(entry.name))
@@ -663,7 +844,13 @@ function normalizeIncomingTodo(todo) {
 
 async function listMarkdownFiles(rootDir) {
   const results = [];
-  const entries = await fs.readdir(rootDir, { withFileTypes: true });
+  let entries = [];
+  try {
+    entries = await fs.readdir(rootDir, { withFileTypes: true });
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw error;
+  }
   for (const entry of entries) {
     if (["attachments", "images"].includes(entry.name)) continue;
     const absolute = path.join(rootDir, entry.name);
@@ -777,22 +964,36 @@ async function scheduleTopic(payload) {
   topic.drop_reason = "";
 
   const calendarProvider = normalizeCalendarProvider(payload.calendarProvider || (payload.syncToLark ? "lark" : "none"));
-  await deleteCalendarEventsExcept(topic, calendarProvider);
 
   if (calendarProvider !== "none") {
-    const syncResult = await syncTopicToCalendar({
-      title,
-      topic,
-      path: source.relPath,
-      provider: calendarProvider,
-    });
-    topic.calendar_provider = syncResult.provider;
-    topic.calendar_sync_status = syncResult.syncStatus;
-    topic.lark_event_id = syncResult.eventId || "";
-    topic.lark_calendar_id = syncResult.calendarId || "";
-    topic.macos_event_id = syncResult.macosEventId || "";
-    topic.macos_calendar_name = syncResult.macosCalendarName || "";
+    try {
+      await deleteCalendarEventsExcept(topic, calendarProvider);
+      const syncResult = await syncTopicToCalendar({
+        title,
+        topic,
+        path: source.relPath,
+        provider: calendarProvider,
+      });
+      topic.calendar_provider = syncResult.provider;
+      topic.calendar_sync_status = syncResult.syncStatus;
+      topic.lark_event_id = syncResult.eventId || "";
+      topic.lark_calendar_id = syncResult.calendarId || "";
+      topic.macos_event_id = syncResult.macosEventId || "";
+      topic.macos_calendar_name = syncResult.macosCalendarName || "";
+    } catch (error) {
+      topic.calendar_provider = calendarProvider;
+      topic.calendar_sync_status = `同步失败：${formatCalendarSyncError(error)}`;
+      topic.lark_event_id = "";
+      topic.lark_calendar_id = "";
+      topic.macos_event_id = "";
+      topic.macos_calendar_name = "";
+    }
   } else {
+    try {
+      await deleteCalendarEventsExcept(topic, calendarProvider);
+    } catch (error) {
+      console.warn("Failed to clean external calendar event while scheduling Markdown-only:", error);
+    }
     topic.calendar_provider = "none";
     topic.calendar_sync_status = "未同步";
     topic.lark_event_id = "";
@@ -807,6 +1008,7 @@ async function scheduleTopic(payload) {
     date,
     time: `${startTime}-${endTime}`,
     calendarProvider,
+    calendarSyncStatus: topic.calendar_sync_status,
   });
   return { ok: true, topic: await readTopic(filePath) };
 }
@@ -901,6 +1103,34 @@ async function disposeTopic(payload) {
     ok: true,
     archived: true,
     archivePath: path.relative((await getPlannerPaths()).vaultRoot, archivePath),
+  };
+}
+
+async function revertImportedTopic(payload) {
+  const filePath = await resolveTopicPath(payload.path);
+  const source = await loadTopicSource(filePath);
+  const title = extractTitle(source.body, path.basename(filePath, ".md"));
+  const topic = normalizeTopic(source.frontmatter, title, source.relPath);
+  const sourceInboxPath = topic.source_inbox_path;
+
+  if (!sourceInboxPath) {
+    throw badRequest("这张卡没有关联收件箱来源，不能撤回到候选。");
+  }
+
+  if (topic.lark_event_id || topic.macos_event_id) {
+    await deleteSyncedCalendarEvent(topic);
+  }
+
+  await fs.unlink(filePath);
+  await appendPlannerLog("topic-revert-import", title, {
+    path: source.relPath,
+    source: sourceInboxPath,
+  });
+
+  return {
+    ok: true,
+    reverted: true,
+    sourceInboxPath,
   };
 }
 
@@ -1253,7 +1483,9 @@ async function syncTopicToLark({ title, topic, path: topicPath }) {
     };
   }
 
-  const calendarId = topic.lark_calendar_id || (await getPrimaryCalendarId());
+  const settings = await getPlannerSettings();
+  const preferredCalendarId = settings.larkCalendarId || "";
+  const calendarId = preferredCalendarId || topic.lark_calendar_id || (await getPrimaryCalendarId());
   const startTs = toEpochSeconds(topic.scheduled_date, topic.scheduled_start);
   const endTs = toEpochSeconds(topic.scheduled_date, topic.scheduled_end);
   const data = {
@@ -1268,6 +1500,12 @@ async function syncTopicToLark({ title, topic, path: topicPath }) {
     attendee_ability: "can_modify_event",
     free_busy_status: "busy",
   };
+
+  if (topic.lark_event_id && preferredCalendarId && topic.lark_calendar_id && topic.lark_calendar_id !== preferredCalendarId) {
+    await deleteLarkEvent(topic);
+    topic.lark_event_id = "";
+    topic.lark_calendar_id = "";
+  }
 
   if (topic.lark_event_id) {
     await execJson("lark-cli", [
@@ -1308,11 +1546,62 @@ async function syncTopicToLark({ title, topic, path: topicPath }) {
   };
 }
 
+async function getLarkCalendarsPayload() {
+  const status = await getLarkStatus();
+  if (!status.available) {
+    return {
+      ok: false,
+      calendars: [],
+      message: status.message || "飞书日历还没有连接。",
+    };
+  }
+
+  const payload = await execJson("lark-cli", [
+    "calendar",
+    "calendars",
+    "list",
+    "--page-size",
+    "100",
+  ]);
+  const rawCalendars = payload?.data?.calendar_list || payload?.calendar_list || [];
+  const calendars = rawCalendars
+    .map(normalizeLarkCalendar)
+    .filter((calendar) => calendar.id && calendar.name);
+  const primary = await fetchPrimaryCalendar();
+  if (primary.id && !calendars.some((calendar) => calendar.id === primary.id)) {
+    calendars.unshift({
+      id: primary.id,
+      name: primary.summary || "主日历",
+      type: "primary",
+      role: "owner",
+      permissions: "",
+    });
+  }
+
+  return {
+    ok: true,
+    calendars,
+    primaryCalendarId: primary.id,
+    primaryCalendarName: primary.summary,
+  };
+}
+
+function normalizeLarkCalendar(calendar = {}) {
+  return {
+    id: optionalString(calendar.calendar_id || calendar.id),
+    name: optionalString(calendar.summary_alias || calendar.summary || calendar.name),
+    type: optionalString(calendar.type),
+    role: optionalString(calendar.role),
+    permissions: optionalString(calendar.permissions),
+  };
+}
+
 async function syncTopicToMacOSCalendar({ title, topic, path: topicPath }) {
   const settings = await getPlannerSettings();
   if (topic.macos_event_id) {
     await deleteMacOSCalendarEvent(topic.macos_event_id);
   }
+  await deleteMacOSCalendarEventsForTopic(topic.topic_id);
 
   const description = [
     "由 Topic Planner 自动同步",
@@ -1322,18 +1611,20 @@ async function syncTopicToMacOSCalendar({ title, topic, path: topicPath }) {
   const eventUid = await createMacOSCalendarEvent({
     title,
     description,
-    startMs: toEpochMilliseconds(topic.scheduled_date, topic.scheduled_start),
-    endMs: toEpochMilliseconds(topic.scheduled_date, topic.scheduled_end),
+    date: topic.scheduled_date,
+    startTime: topic.scheduled_start,
+    endTime: topic.scheduled_end,
     calendarName: settings.macosCalendarName,
   });
+  const [uid, actualCalendarName] = eventUid.split("\t");
 
   return {
     provider: "macos",
-    syncStatus: eventUid ? "已同步" : "同步失败",
+    syncStatus: uid ? "已同步" : "同步失败",
     eventId: "",
     calendarId: "",
-    macosEventId: eventUid,
-    macosCalendarName: settings.macosCalendarName || "默认日历",
+    macosEventId: uid,
+    macosCalendarName: actualCalendarName || settings.macosCalendarName || "默认可写日历",
   };
 }
 
@@ -1350,11 +1641,15 @@ async function deleteLarkEvent(topic) {
 }
 
 async function deleteSyncedCalendarEvent(topic) {
+  const provider = optionalString(topic.calendar_provider);
   if (topic.lark_event_id) {
     await deleteLarkEvent(topic);
   }
   if (topic.macos_event_id) {
     await deleteMacOSCalendarEvent(topic.macos_event_id);
+  }
+  if (provider === "macos") {
+    await deleteMacOSCalendarEventsForTopic(topic.topic_id);
   }
 
   topic.calendar_provider = "none";
@@ -1378,53 +1673,155 @@ async function deleteCalendarEventsExcept(topic, provider) {
   }
 }
 
-async function createMacOSCalendarEvent({ title, description, startMs, endMs, calendarName }) {
+async function createMacOSCalendarEvent({ title, description, date, startTime, endTime, calendarName }) {
+  const startDateScript = buildAppleScriptDate("startDate", date, startTime);
+  const endDateScript = buildAppleScriptDate("endDate", date, endTime);
   const script = `
-(() => {
-const Calendar = Application('Calendar');
-Calendar.includeStandardAdditions = true;
-const title = ${JSON.stringify(title)};
-const description = ${JSON.stringify(description)};
-const preferredName = ${JSON.stringify(calendarName || "")};
-const startDate = new Date(${JSON.stringify(startMs)});
-const endDate = new Date(${JSON.stringify(endMs)});
-const calendars = Calendar.calendars();
-let target = null;
-if (preferredName) {
-  target = calendars.find((calendar) => calendar.name() === preferredName);
-}
-if (!target) {
-  target = calendars[0];
-}
-if (!target) {
-  throw new Error('macOS 日历里没有可用日历');
-}
-const event = Calendar.Event({ summary: title, startDate, endDate, description });
-target.events.push(event);
-return event.uid();
-})();
+tell application id "com.apple.iCal"
+  set preferredName to ${toAppleScriptString(calendarName || "")}
+  set targetCalendar to missing value
+  if preferredName is not "" then
+    repeat with candidateCalendar in calendars
+      if name of candidateCalendar is preferredName then
+        set targetCalendar to candidateCalendar
+        exit repeat
+      end if
+    end repeat
+    if targetCalendar is missing value then error "找不到 macOS 日历「" & preferredName & "」"
+  else
+    repeat with candidateCalendar in calendars
+      if writable of candidateCalendar is true then
+        set targetCalendar to candidateCalendar
+        exit repeat
+      end if
+    end repeat
+    if targetCalendar is missing value then error "macOS 日历里没有可写日历"
+  end if
+  if writable of targetCalendar is false then error "macOS 日历「" & (name of targetCalendar) & "」是只读日历"
+
+${startDateScript}
+${endDateScript}
+  set createdEvent to make new event at end of events of targetCalendar with properties {summary:${toAppleScriptString(title)}, start date:startDate, end date:endDate, description:${toAppleScriptString(description)}}
+  return (uid of createdEvent) & tab & (name of targetCalendar)
+end tell
 `;
-  return optionalString(await execText("osascript", ["-l", "JavaScript", "-e", script], { timeoutMs: 60_000 }));
+  return optionalString(await execText("osascript", ["-e", script], { timeoutMs: 60_000 }));
 }
 
 async function deleteMacOSCalendarEvent(eventUid) {
   if (!eventUid) return;
   const script = `
-(() => {
-const Calendar = Application('Calendar');
-const uid = ${JSON.stringify(eventUid)};
-const calendars = Calendar.calendars();
-for (const calendar of calendars) {
-  const matches = calendar.events.whose({ uid })();
-  if (matches.length > 0) {
-    matches[0].delete();
-    return 'deleted';
-  }
-}
-return 'missing';
-})();
+tell application id "com.apple.iCal"
+  set targetUid to ${toAppleScriptString(eventUid)}
+  repeat with candidateCalendar in calendars
+    set matchingEvents to every event of candidateCalendar whose uid is targetUid
+    if (count of matchingEvents) > 0 then
+      delete item 1 of matchingEvents
+      return "deleted"
+    end if
+  end repeat
+  return "missing"
+end tell
 `;
-  await execText("osascript", ["-l", "JavaScript", "-e", script], { timeoutMs: 60_000 });
+  await execText("osascript", ["-e", script], { timeoutMs: 60_000 });
+}
+
+async function deleteMacOSCalendarEventsForTopic(topicId) {
+  const normalizedTopicId = optionalString(topicId);
+  if (!normalizedTopicId) return;
+  const script = `
+tell application id "com.apple.iCal"
+  set targetLine to "topic_id: " & ${toAppleScriptString(normalizedTopicId)}
+  set deletedCount to 0
+  repeat with candidateCalendar in calendars
+    set matchingEvents to every event of candidateCalendar whose description contains targetLine
+    repeat with candidateEvent in matchingEvents
+      set shouldDelete to false
+      repeat with descriptionLine in paragraphs of (description of candidateEvent)
+        if (descriptionLine as text) is targetLine then
+          set shouldDelete to true
+          exit repeat
+        end if
+      end repeat
+      if shouldDelete is true then
+        delete candidateEvent
+        set deletedCount to deletedCount + 1
+      end if
+    end repeat
+  end repeat
+  return deletedCount as string
+end tell
+`;
+  await execText("osascript", ["-e", script], { timeoutMs: 60_000 });
+}
+
+async function getMacOSCalendarsPayload() {
+  const calendars = await listMacOSCalendars();
+  return {
+    ok: true,
+    calendars,
+    writableCalendars: calendars.filter((calendar) => calendar.writable),
+  };
+}
+
+async function listMacOSCalendars() {
+  const script = `
+tell application id "com.apple.iCal"
+  set calendarLines to ""
+  repeat with candidateCalendar in calendars
+    set calendarLines to calendarLines & (name of candidateCalendar) & tab & ((writable of candidateCalendar) as string) & linefeed
+  end repeat
+  return calendarLines
+end tell
+`;
+  const output = await execText("osascript", ["-e", script], { timeoutMs: 30_000 });
+  return output
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [name, writableText = "false"] = line.split("\t");
+      return {
+        name: optionalString(name),
+        writable: writableText === "true",
+      };
+    })
+    .filter((calendar) => calendar.name);
+}
+
+function buildAppleScriptDate(variableName, date, time) {
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  const monthName = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+  ][month - 1];
+  const secondsFromMidnight = hour * 3600 + minute * 60;
+  return [
+    `  set ${variableName} to current date`,
+    `  set day of ${variableName} to 1`,
+    `  set year of ${variableName} to ${year}`,
+    `  set month of ${variableName} to ${monthName}`,
+    `  set day of ${variableName} to ${day}`,
+    `  set time of ${variableName} to ${secondsFromMidnight}`,
+  ].join("\n");
+}
+
+function toAppleScriptString(value) {
+  return `"${String(value ?? "")
+    .replace(/\\/g, "\\\\")
+    .replace(/"/g, '\\"')
+    .replace(/\r\n|\r|\n/g, '" & linefeed & "')}"`;
 }
 
 async function startLarkAuthRepair() {
@@ -1637,6 +2034,12 @@ function isNetworkError(error) {
   return /ENOTFOUND|ECONNRESET|ECONNREFUSED|ETIMEDOUT|network|timeout|TLS|EAI_AGAIN|网络/i.test(message);
 }
 
+function formatCalendarSyncError(error) {
+  const message = optionalString(error?.message);
+  if (!message) return "未知错误";
+  return message.replace(/\s+/g, " ").slice(0, 240);
+}
+
 function extractUserCode(verificationUrl) {
   try {
     const url = new URL(verificationUrl);
@@ -1721,6 +2124,15 @@ function isDemoConfigRun() {
   return isPathInside(SAMPLE_VAULT_ROOT, configPath);
 }
 
+async function plannerConfigExists() {
+  try {
+    await fs.access(getPlannerConfigPath(PROJECT_ROOT));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function isPathInside(parentPath, childPath) {
   const relative = path.relative(path.resolve(parentPath), path.resolve(childPath));
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
@@ -1765,14 +2177,52 @@ function normalizeTimeString(value) {
   return /^\d{2}:\d{2}$/.test(text) ? text : "";
 }
 
-function toEpochSeconds(date, time) {
-  const iso = `${date}T${time}:00+08:00`;
-  return Math.floor(new Date(iso).getTime() / 1000);
+function toEpochSeconds(date, time, timeZone = TIMEZONE) {
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  const baseUtc = Date.UTC(year, month - 1, day, hour, minute, 0);
+  let resolvedUtc = baseUtc;
+
+  for (let index = 0; index < 3; index += 1) {
+    const offset = getTimeZoneOffsetMs(new Date(resolvedUtc), timeZone);
+    const nextUtc = baseUtc - offset;
+    if (nextUtc === resolvedUtc) break;
+    resolvedUtc = nextUtc;
+  }
+
+  return Math.floor(resolvedUtc / 1000);
 }
 
-function toEpochMilliseconds(date, time) {
-  const iso = `${date}T${time}:00+08:00`;
-  return new Date(iso).getTime();
+function getTimeZoneOffsetMs(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const zonedAsUtc = Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+    Number(values.hour),
+    Number(values.minute),
+    Number(values.second),
+  );
+  return zonedAsUtc - date.getTime();
+}
+
+function normalizeTimeZone(value) {
+  const candidate = optionalString(value) || "UTC";
+  try {
+    return Intl.DateTimeFormat(undefined, { timeZone: candidate }).resolvedOptions().timeZone;
+  } catch {
+    return "UTC";
+  }
 }
 
 function normalizeCalendarProvider(value) {
@@ -1782,6 +2232,32 @@ function normalizeCalendarProvider(value) {
 
 function optionalString(value) {
   return value === undefined || value === null ? "" : String(value).trim();
+}
+
+function validateVaultRelativeDirectory(value, label) {
+  const rawValue = optionalString(value).replace(/\\/g, "/");
+  const withoutTrailingSlashes = rawValue.replace(/\/+$/g, "");
+  if (!withoutTrailingSlashes) return "";
+  if (path.posix.isAbsolute(withoutTrailingSlashes)) {
+    throw badRequest(`${label}必须是当前 Vault 内的相对路径`);
+  }
+  const normalized = path.posix.normalize(withoutTrailingSlashes);
+  if (normalized === ".." || normalized.startsWith("../")) {
+    throw badRequest(`${label}不能指向 Vault 外部`);
+  }
+  return normalized;
+}
+
+function assertLocalRequest(req) {
+  const address = optionalString(req.socket?.remoteAddress).toLowerCase();
+  const isLoopback = address === "::1"
+    || address.startsWith("127.")
+    || address.startsWith("::ffff:127.");
+  if (!isLoopback) {
+    const error = new Error("文件夹选择器只能从本机打开");
+    error.statusCode = 403;
+    throw error;
+  }
 }
 
 function todayString() {

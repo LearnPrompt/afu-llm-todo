@@ -1296,6 +1296,45 @@ function createInboxCandidateCard(candidate) {
     actions.append(bar);
   });
   actions.append(importBtn);
+
+  const dismissBtn = document.createElement('button');
+  dismissBtn.className = 'mini-btn danger-btn';
+  dismissBtn.type = 'button';
+  dismissBtn.textContent = '删除';
+  dismissBtn.addEventListener('click', () => {
+    const existing = actions.querySelector('.inline-confirm');
+    if (existing) { existing.remove(); return; }
+    const bar = document.createElement('div');
+    bar.className = 'inline-confirm';
+    const msg = document.createElement('span');
+    msg.textContent = '标记为已处理并从收件箱移除？原文件不会被删除。';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.className = 'mini-btn';
+    cancelBtn.textContent = '取消';
+    cancelBtn.addEventListener('click', () => bar.remove());
+    const okBtn = document.createElement('button');
+    okBtn.type = 'button';
+    okBtn.className = 'mini-btn accent-btn';
+    okBtn.textContent = '确认';
+    okBtn.addEventListener('click', () => { bar.remove(); dismissInboxCandidate(candidate); });
+    bar.append(msg, cancelBtn, okBtn);
+    actions.append(bar);
+  });
+  actions.append(dismissBtn);
+
+  const inboxRefetchReasons = candidate.reasons || [];
+  if (inboxRefetchReasons.includes('缺少原始链接') || inboxRefetchReasons.includes('内容疑似未完整抓取')) {
+    const refetchBtn = document.createElement('button');
+    refetchBtn.className = 'mini-btn';
+    refetchBtn.type = 'button';
+    refetchBtn.textContent = '重新抓取';
+    refetchBtn.addEventListener('click', () => {
+      refetchInboxCandidate(candidate, refetchBtn, card);
+    });
+    actions.append(refetchBtn);
+  }
+
   card.append(actions);
 
   return card;
@@ -1780,6 +1819,61 @@ async function importInboxCandidate(candidate) {
     alert(error.message);
   } finally {
     setBusy(false);
+  }
+}
+
+async function dismissInboxCandidate(candidate) {
+  setBusy(true);
+  try {
+    const response = await fetch('/api/inbox/dismiss', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourcePath: candidate.sourcePath }),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || '删除失败');
+    }
+    state.inboxCandidates = (state.inboxCandidates || []).filter((item) => item.sourcePath !== candidate.sourcePath);
+    renderInboxCandidates();
+  } catch (error) {
+    alert(error.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function refetchInboxCandidate(candidate, button, card) {
+  const originalText = button.textContent;
+  button.disabled = true;
+  button.textContent = '抓取中，可能要几分钟…';
+  card.querySelector('.inbox-refetch-error')?.remove();
+  try {
+    const response = await fetch('/api/inbox/refetch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourcePath: candidate.sourcePath }),
+    });
+    const data = await response.json();
+    if (!response.ok || data.ok !== true) {
+      const message = data.message || data.error || '抓取失败';
+      const warning = document.createElement('p');
+      warning.className = 'inbox-refetch-error inbox-warning';
+      warning.textContent = message;
+      card.append(warning);
+      button.disabled = false;
+      button.textContent = originalText;
+      return;
+    }
+    await loadTopics();
+  } catch (error) {
+    card.querySelector('.inbox-refetch-error')?.remove();
+    const warning = document.createElement('p');
+    warning.className = 'inbox-refetch-error inbox-warning';
+    warning.textContent = error.message;
+    card.append(warning);
+    button.disabled = false;
+    button.textContent = originalText;
   }
 }
 

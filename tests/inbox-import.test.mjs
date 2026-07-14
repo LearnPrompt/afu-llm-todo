@@ -5,6 +5,7 @@ import {
   buildTopicDraftFromInbox,
   deriveInboxCandidate,
   makeTopicFilename,
+  normalizeUrl,
 } from '../inbox-import.mjs';
 
 const sampleInboxPath = '00_收件箱/2026-04-18/宝玉- Anthropic 自家设计师 Ryan Mather，一人负责公司 7 个产品.md';
@@ -64,6 +65,17 @@ test('deriveInboxCandidate marks sparse clips as low confidence', () => {
   assert.ok(candidate.reasons.length >= 1);
 });
 
+test('deriveInboxCandidate flags quota-failure notices even when url is present', () => {
+  const raw = `---\nauthor: unknown\nsource: v.douyin.com\nurl: https://v.douyin.com/HJhdr2YooTQ/\n---\n\n[标题](https://v.douyin.com/HJhdr2YooTQ/)\n\n> 积分余额不足，视频转图文已跳过，仅保留原链接。\n\n---\n\n<sub>**积分余额不足，视频转图文已跳过**</sub>`;
+  const candidate = deriveInboxCandidate({
+    filePath: '00_收件箱/积分不足.md',
+    raw,
+  });
+
+  assert.ok(!candidate.reasons.includes('缺少原始链接'));
+  assert.ok(candidate.reasons.includes('内容疑似未完整抓取'));
+});
+
 test('buildTopicDraftFromInbox creates planner-compatible topic card markdown', () => {
   const candidate = deriveInboxCandidate({
     filePath: sampleInboxPath,
@@ -93,4 +105,26 @@ test('buildTopicDraftFromInbox creates planner-compatible topic card markdown', 
 test('makeTopicFilename sanitizes path-hostile characters', () => {
   const filename = makeTopicFilename('Figma/Claude: Design? 太猛了');
   assert.equal(filename, '【选题】Figma-Claude- Design- 太猛了.md');
+});
+
+test('normalizeUrl strips utm_ params regardless of order', () => {
+  const a = normalizeUrl('https://example.com/post?utm_source=wechat&id=42&utm_campaign=abc');
+  const b = normalizeUrl('https://example.com/post?id=42&utm_campaign=abc&utm_source=wechat');
+  assert.equal(a, b);
+  assert.equal(a, 'https://example.com/post?id=42');
+});
+
+test('normalizeUrl strips known tracking params like from and share_from', () => {
+  const url = normalizeUrl('https://x.com/dotey/status/123?from=timeline&share_from=wechat&s=46');
+  assert.equal(url, 'https://x.com/dotey/status/123?s=46');
+});
+
+test('normalizeUrl drops trailing slash and fragment', () => {
+  assert.equal(normalizeUrl('https://example.com/post/'), normalizeUrl('https://example.com/post'));
+  assert.equal(normalizeUrl('https://example.com/post#section'), 'https://example.com/post');
+});
+
+test('normalizeUrl falls back to trimmed original value when unparsable', () => {
+  assert.equal(normalizeUrl('  not a url  '), 'not a url');
+  assert.equal(normalizeUrl(''), '');
 });

@@ -1,7 +1,8 @@
 import { createServer } from "node:http";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -104,6 +105,16 @@ createServer(async (req, res) => {
     if (url.pathname === "/api/inbox/import" && req.method === "POST") {
       const body = await readJsonBody(req);
       return respondJson(res, await importInboxCandidate(body));
+    }
+
+    if (url.pathname === "/api/inbox/dismiss" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      return respondJson(res, await setInboxFileProcessed(body.sourcePath));
+    }
+
+    if (url.pathname === "/api/inbox/refetch" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      return respondJson(res, await refetchInboxCandidate({ sourcePath: body.sourcePath }));
     }
 
     if (url.pathname === "/api/inbox/import-batch" && req.method === "POST") {
@@ -725,6 +736,7 @@ async function analyzeInboxCandidates(existingTopics = []) {
     inboxSkippedShort: 0,
     inboxLowInformation: 0,
     inboxSkippedSystem: 0,
+    inboxSkippedDuplicate: 0,
   };
 
   for (const filePath of files) {
@@ -755,13 +767,40 @@ async function analyzeInboxCandidates(existingTopics = []) {
   }
 
   candidates.sort((left, right) => (right.savedAt || "").localeCompare(left.savedAt || "") || left.title.localeCompare(right.title, "zh-CN"));
-  summary.inboxCandidateFiles = candidates.length;
-  return { candidates, summary };
+
+  const dedupedCandidates = dedupeInboxCandidatesByKey(candidates, summary);
+
+  summary.inboxCandidateFiles = dedupedCandidates.length;
+  return { candidates: dedupedCandidates, summary };
+}
+
+const INBOX_CONFIDENCE_RANK = { high: 3, medium: 2, low: 1 };
+
+function dedupeInboxCandidatesByKey(candidates, summary) {
+  const winners = new Map();
+  for (const candidate of candidates) {
+    const key = candidate.dedupeKey;
+    const existing = winners.get(key);
+    if (!existing) {
+      winners.set(key, candidate);
+      continue;
+    }
+    const existingRank = INBOX_CONFIDENCE_RANK[existing.confidence] || 0;
+    const candidateRank = INBOX_CONFIDENCE_RANK[candidate.confidence] || 0;
+    const candidateWins =
+      candidateRank > existingRank ||
+      (candidateRank === existingRank && (candidate.savedAt || "") > (existing.savedAt || ""));
+    if (candidateWins) {
+      winners.set(key, candidate);
+    }
+    summary.inboxSkippedDuplicate += 1;
+  }
+  return candidates.filter((candidate) => winners.get(candidate.dedupeKey) === candidate);
 }
 
 function isSystemInboxFile(relPath) {
   const basename = path.basename(relPath);
-  return basename === "README.md" || basename.startsWith(".");
+  return basename === "README.md" || basename.startsWith(".") || /^同步助手_\d{4}-\d{2}-\d{2}\.md$/.test(basename);
 }
 
 function titleKeywords(title) {
@@ -1074,6 +1113,150 @@ async function resolveInboxPath(relPath) {
     throw badRequest("收件箱路径不合法");
   }
   return absolute;
+}
+
+// Minimal-invasion patch of a single frontmatter field: replaces an existing
+// `key: ...` line in the `---`-delimited block, or inserts one right after
+// the opening `---` if the key isn't present. Deliberately avoids the full
+// parseFrontmatter/serializeFrontmatter round trip so unknown third-party
+// fields keep their original formatting and ordering.
+function patchFrontmatterField(raw, key, value) {
+  const blockRegex = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
+  const match = raw.match(blockRegex);
+  if (!match) {
+    return `---\n${key}: ${value}\n---\n\n${raw}`;
+  }
+
+  const fmBody = match[1];
+  const lineRegex = new RegExp(`(^|\\n)${key}:[^\\n]*`);
+  let newFmBody;
+  if (lineRegex.test(fmBody)) {
+    newFmBody = fmBody.replace(lineRegex, `$1${key}: ${value}`);
+  } else {
+    newFmBody = `${key}: ${value}\n${fmBody}`;
+  }
+
+  const newBlock = `---\n${newFmBody}\n---\n`;
+  return raw.slice(0, match.index) + newBlock + raw.slice(match.index + match[0].length);
+}
+
+async function setInboxFileProcessed(sourcePath) {
+  const relPath = optionalString(sourcePath);
+  if (!relPath) {
+    throw badRequest("必须提供收件箱路径");
+  }
+  const absolutePath = await resolveInboxPath(relPath);
+  const raw = await fs.readFile(absolutePath, "utf8");
+  const updated = patchFrontmatterField(raw, "status", "processed");
+  await fs.writeFile(absolutePath, updated, "utf8");
+  await appendPlannerLog("inbox-dismiss", path.basename(relPath, ".md"), {
+    source: relPath,
+  });
+  return { ok: true, sourcePath: relPath };
+}
+
+const INBOX_SHORT_LINK_PATTERN = /https?:\/\/(?:v\.douyin\.com|xhslink\.com|b23\.tv)\/[A-Za-z0-9\/]+/;
+const REFETCH_SCRIPT_PATH = path.join(process.env.HOME || "", "projects/paoding-skill/skills/paoding/scripts/collect.sh");
+const REFETCH_TIMEOUT_MS = 300000;
+
+function runRefetchScript(url, tmpDir) {
+  return new Promise((resolve) => {
+    const child = spawn("bash", [REFETCH_SCRIPT_PATH, url, tmpDir, "--browser", "chrome"]);
+    let stdout = "";
+    let stderr = "";
+    let timedOut = false;
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, REFETCH_TIMEOUT_MS);
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      resolve({ code, stdout, stderr, timedOut });
+    });
+  });
+}
+
+async function refetchInboxCandidate({ sourcePath }) {
+  const relPath = optionalString(sourcePath);
+  if (!relPath) {
+    throw badRequest("必须提供收件箱路径");
+  }
+  const absolutePath = await resolveInboxPath(relPath);
+  const raw = await fs.readFile(absolutePath, "utf8");
+  const { frontmatter, body } = parseFrontmatter(raw);
+
+  let sourceUrl = optionalString(frontmatter.url || frontmatter.source_url || "");
+  let urlIsNew = false;
+  if (!sourceUrl) {
+    const bodyMatch = String(body || "").match(INBOX_SHORT_LINK_PATTERN);
+    if (bodyMatch) {
+      sourceUrl = bodyMatch[0];
+      urlIsNew = true;
+    }
+  }
+  if (!sourceUrl) {
+    throw badRequest("正文里也没找到可识别的分享链接，需要人工补链接");
+  }
+
+  const tmpDir = path.join(os.tmpdir(), `afu-refetch-${Date.now()}`);
+  await fs.mkdir(tmpDir, { recursive: true });
+
+  const { code, stderr, timedOut } = await runRefetchScript(sourceUrl, tmpDir);
+
+  let result;
+  if (!timedOut && code === 0) {
+    const files = await fs.readdir(tmpDir);
+    const transcriptFile = files.find((name) => name.endsWith(".txt"));
+    const transcript = transcriptFile ? await fs.readFile(path.join(tmpDir, transcriptFile), "utf8") : "";
+    const date = new Date().toISOString().slice(0, 10);
+    const section = ["", `## 补充素材（抓取日期 ${date}）`, `- 来源链接：${sourceUrl}`, "", transcript, ""].join("\n");
+
+    let updatedRaw = raw + section;
+    if (urlIsNew) {
+      updatedRaw = patchFrontmatterField(updatedRaw, "url", sourceUrl);
+    }
+    await fs.writeFile(absolutePath, updatedRaw, "utf8");
+
+    result = { ok: true, message: "已追加转写内容", sourcePath: relPath, url: sourceUrl };
+  } else if (timedOut) {
+    result = {
+      ok: false,
+      reason: "timeout",
+      message: `超过 5 分钟未完成，建议手动跑命令行：bash ~/projects/paoding-skill/skills/paoding/scripts/collect.sh ${sourceUrl}`,
+    };
+  } else if (code === 3) {
+    result = { ok: false, reason: "need_login", message: stderr.slice(0, 500) };
+  } else if (code === 4) {
+    result = { ok: false, reason: "download_failed", message: stderr.slice(0, 500) };
+  } else if (code === 5) {
+    result = {
+      ok: false,
+      reason: "transcribe_failed",
+      message: `${stderr.slice(0, 500)}（音频已保留在 ${tmpDir}，可手动重试）`,
+    };
+  } else {
+    result = {
+      ok: false,
+      reason: "unknown",
+      message: stderr.slice(0, 500) || `未知错误，退出码 ${code}`,
+    };
+  }
+
+  await appendPlannerLog("inbox-refetch", path.basename(relPath, ".md"), {
+    source: relPath,
+    reason: result.reason || "success",
+    code: String(code),
+  });
+
+  return result;
 }
 
 async function readTopic(filePath) {

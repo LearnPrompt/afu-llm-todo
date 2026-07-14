@@ -137,3 +137,73 @@ test('POST /api/inbox/refetch rejects candidates with no recoverable link', asyn
     await server.close();
   }
 });
+
+test('import merges only on identical normalized URL, not on share-boilerplate title overlap', async () => {
+  const server = await spawnPlannerServer();
+  try {
+    const first = await writeInboxFile(
+      server,
+      '抖音分享一.md',
+      [
+        '---',
+        'url: https://v.douyin.com/AAAAAAA/',
+        '---',
+        '',
+        '5.15 复制打开抖音，看看【大师的AI小灶的作品】VibeCoding大赏｜我做了一个PPT Skill，正文信息量足够。',
+      ].join('\n'),
+    );
+    const second = await writeInboxFile(
+      server,
+      '抖音分享二.md',
+      [
+        '---',
+        'url: https://v.douyin.com/BBBBBBB/',
+        '---',
+        '',
+        '1.07 复制打开抖音，看看【蔡不菜Caitlyn的作品】AI剪辑也太6了，正文信息量足够。',
+      ].join('\n'),
+    );
+    const sameUrlVariant = await writeInboxFile(
+      server,
+      '抖音分享一的重复.md',
+      [
+        '---',
+        'url: https://v.douyin.com/AAAAAAA/?from=timeline',
+        '---',
+        '',
+        '同一条视频的另一次分享，链接只差跟踪参数，应该并入第一张卡而不是新建。',
+      ].join('\n'),
+    );
+
+    const firstResult = await server.request('/api/inbox/import', {
+      method: 'POST',
+      body: JSON.stringify({ sourcePath: first }),
+    });
+    assert.equal(firstResult.status, 200);
+    assert.equal(firstResult.json.merged, false);
+
+    // 标题共享大量「复制打开抖音，看看【…的作品】」模板文字，但 URL 不同 → 必须新建
+    const secondResult = await server.request('/api/inbox/import', {
+      method: 'POST',
+      body: JSON.stringify({ sourcePath: second }),
+    });
+    assert.equal(secondResult.status, 200);
+    assert.equal(secondResult.json.merged, false);
+
+    // URL 归一化后与第一条相同 → 合并，且源文件被标记 processed、从候选中消失
+    const thirdResult = await server.request('/api/inbox/import', {
+      method: 'POST',
+      body: JSON.stringify({ sourcePath: sameUrlVariant }),
+    });
+    assert.equal(thirdResult.status, 200);
+    assert.equal(thirdResult.json.merged, true);
+
+    const mergedSourceRaw = await fs.readFile(path.join(server.vaultRoot, sameUrlVariant), 'utf8');
+    assert.match(mergedSourceRaw, /^status: processed$/m);
+
+    const after = await server.request('/api/topics');
+    assert.equal(after.json.inboxCandidates.length, 0);
+  } finally {
+    await server.close();
+  }
+});

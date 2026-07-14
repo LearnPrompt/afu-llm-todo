@@ -2042,3 +2042,13 @@ button:disabled {
   border-color: #8f1d12;
 }
 
+
+.obsidian-link {
+  cursor: pointer;
+}
+
+.obsidian-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}

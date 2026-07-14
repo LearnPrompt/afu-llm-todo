@@ -1094,6 +1094,14 @@ function renderCalendar() {
   }
 }
 
+function obsidianOpenUri(relPath) {
+  if (!relPath) return "";
+  const vaultRoot = state.settings?.vaultRoot || "";
+  if (!vaultRoot || state.settings?.workspaceMode === "standalone") return "";
+  const vaultName = vaultRoot.split("/").filter(Boolean).at(-1);
+  return `obsidian://open?vault=${encodeURIComponent(vaultName)}&file=${encodeURIComponent(relPath)}`;
+}
+
 function createTopicCard(topic, options = {}) {
   const fragment = elements.topicCardTemplate.content.cloneNode(true);
   const card = fragment.querySelector(".topic-card");
@@ -1150,6 +1158,15 @@ function createTopicCard(topic, options = {}) {
   }
   title.textContent = stripTopicPrefix(topic.title);
   title.title = stripTopicPrefix(topic.title);
+  const openUri = obsidianOpenUri(topic.path);
+  if (openUri) {
+    title.classList.add("obsidian-link");
+    title.title = `在 Obsidian 打开：${stripTopicPrefix(topic.title)}`;
+    title.addEventListener("click", (event) => {
+      event.stopPropagation();
+      window.location.href = openUri;
+    });
+  }
   excerpt.textContent = topic.excerpt || "暂无摘要";
   date.textContent = topic.scheduledDate
     ? `${topic.scheduledDate}${topic.scheduledStart ? ` · ${topic.scheduledStart}-${topic.scheduledEnd}` : ""}`
@@ -1913,14 +1930,19 @@ async function importSelectedInboxCandidates(sourcePaths = Array.from(state.sele
     state.workspaceView = "inbox";
     renderWorkspaceView();
     const failedCount = (data.failed || []).length;
-    const message = failedCount
-      ? `已转入排期池 ${data.created.length} 条，失败 ${failedCount} 条。`
-      : `已转入排期池 ${data.created.length} 条。`;
+    const mergedItems = (data.created || []).filter((item) => item.merged);
+    const newCount = (data.created || []).length - mergedItems.length;
+    const parts = [`已新建 ${newCount} 条`];
+    if (mergedItems.length) parts.push(`并入已有卡 ${mergedItems.length} 条`);
+    if (failedCount) parts.push(`失败 ${failedCount} 条`);
+    const message = `${parts.join('，')}。`;
 
     if ((data.created || []).length) {
       showImportResultDialog((data.created || []).map((item) => ({
         path: item.path,
-        title: stripTopicPrefix(item.title || ""),
+        title: item.merged
+          ? `已并入 →「${stripTopicPrefix(item.title || "")}」`
+          : stripTopicPrefix(item.title || ""),
       })), {
         failedCount,
         message: failedCount
@@ -1956,6 +1978,14 @@ function showImportResultDialog(items, options = {}) {
     row.className = "import-result-item";
     const title = document.createElement("strong");
     title.textContent = stripTopicPrefix(item.title || "未命名卡片");
+    const itemUri = obsidianOpenUri(item.path);
+    if (itemUri) {
+      title.classList.add("obsidian-link");
+      title.title = "在 Obsidian 打开";
+      title.addEventListener("click", () => {
+        window.location.href = itemUri;
+      });
+    }
     const meta = document.createElement("span");
     meta.textContent = item.path || "已写入本地 Markdown";
     row.append(title, meta);

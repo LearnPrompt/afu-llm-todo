@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildTopicDraftFromInbox, deriveInboxCandidate } from "./inbox-import.mjs";
+import { buildTopicDraftFromInbox, deriveInboxCandidate, normalizeUrl } from "./inbox-import.mjs";
 import { suggestMergeGroups } from "./deepseek-client.mjs";
 import {
   buildAppleScriptDate,
@@ -803,27 +803,6 @@ function isSystemInboxFile(relPath) {
   return basename === "README.md" || basename.startsWith(".") || /^同步助手_\d{4}-\d{2}-\d{2}\.md$/.test(basename);
 }
 
-function titleKeywords(title) {
-  const stops = new Set(['的', '了', '是', '在', '有', '和', '与', '从', '为', '把', '被', '对', '让', '能', '也', '都', '就', '到', '中', '上', '下', '来', '去', '会', '要', '这', '那', '个', '着', '过', '一', '不', '我', '你', '他', '她']);
-  return new Set(
-    title
-      .replace(/[，。！？、：；「」【】《》()（）[\]\/\\,.!?;:\-_\s]/g, ' ')
-      .split(/\s+/)
-      .flatMap(t => /[一-鿿]/.test(t) ? [...t] : [t])
-      .filter(t => t.length > 0 && !stops.has(t))
-      .map(t => t.toLowerCase())
-  );
-}
-
-function keywordOverlap(a, b) {
-  const ka = titleKeywords(a);
-  const kb = titleKeywords(b);
-  if (!ka.size || !kb.size) return 0;
-  let shared = 0;
-  for (const k of ka) if (kb.has(k)) shared++;
-  return shared / Math.min(ka.size, kb.size);
-}
-
 function buildAppendSection(candidate) {
   const date = new Date().toISOString().slice(0, 10);
   return [
@@ -851,13 +830,19 @@ async function importInboxCandidate(payload) {
   const raw = await fs.readFile(absolutePath, "utf8");
   const candidate = deriveInboxCandidate({ filePath: sourcePath, raw });
 
-  // Dedup: 标题关键词重叠 ≥50% 时合并到已有卡
+  // Dedup: 归一化 URL 完全一致才自动合并。标题相似不再触发自动合并——
+  // 抖音/小红书分享标题里「复制打开抖音，看看【…的作品】」这类模板文字
+  // 会让不相干的卡片重叠率虚高，相似合并只能走手动确认的合并建议。
   const topics = await listTopics();
-  const duplicate = topics.find(t => keywordOverlap(candidate.title, t.title) >= 0.5);
+  const normalizedUrl = candidate.sourceUrl ? normalizeUrl(candidate.sourceUrl) : "";
+  const duplicate = normalizedUrl
+    ? topics.find(t => t.sourceUrl && normalizeUrl(t.sourceUrl) === normalizedUrl)
+    : null;
   if (duplicate) {
     const absoluteTopicPath = path.join(vaultRoot, duplicate.path);
     const existing = await fs.readFile(absoluteTopicPath, "utf8");
     await fs.writeFile(absoluteTopicPath, existing + buildAppendSection(candidate), "utf8");
+    await fs.writeFile(absolutePath, patchFrontmatterField(raw, "status", "processed"), "utf8");
     await appendPlannerLog("inbox-merge", candidate.title, {
       source: candidate.sourcePath,
       mergedInto: duplicate.path,

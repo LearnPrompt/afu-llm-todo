@@ -5,6 +5,7 @@ const CONFIG_FILENAME = 'topic-planner.config.json';
 const DEFAULT_DIRS = {
   topicDir: '40_行动卡片',
   inboxDir: '00_收件箱',
+  inboxDirs: [],
   archiveDir: '99_系统/归档/行动卡片',
   wikiDir: '30_整理Wiki',
   wikiIndexPath: '30_整理Wiki/index.md',
@@ -74,6 +75,13 @@ function normalizeOptionalRelativeDir(value) {
   return normalizeRelativeDir(value, '');
 }
 
+function normalizeInboxDirs(value, mode) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((v) => normalizeDirForMode(v, '', mode))
+    .filter(Boolean);
+}
+
 function normalizeVaultProfiles(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const profiles = {};
@@ -84,6 +92,9 @@ function normalizeVaultProfiles(value) {
     const inboxDir = normalizeOptionalRelativeDir(profile.inboxDir);
     const archiveDir = normalizeOptionalRelativeDir(profile.archiveDir);
     if (!topicDir || !inboxDir || !archiveDir) continue;
+    const inboxDirs = Array.isArray(profile.inboxDirs)
+      ? profile.inboxDirs.map((d) => normalizeOptionalRelativeDir(d)).filter(Boolean)
+      : [];
     const wikiDir = normalizeOptionalRelativeDir(profile.wikiDir);
     const wikiIndexPath = normalizeOptionalRelativeDir(profile.wikiIndexPath);
     const wikiLogPath = normalizeOptionalRelativeDir(profile.wikiLogPath);
@@ -91,6 +102,7 @@ function normalizeVaultProfiles(value) {
       topicDir,
       inboxDir,
       archiveDir,
+      ...(inboxDirs.length ? { inboxDirs } : {}),
       ...(wikiDir ? { wikiDir } : {}),
       ...(wikiIndexPath ? { wikiIndexPath } : {}),
       ...(wikiLogPath ? { wikiLogPath } : {}),
@@ -147,6 +159,7 @@ function normalizePlannerSettings(settings = {}, projectRoot = process.cwd()) {
     vaultProfiles: normalizeVaultProfiles(settings.vaultProfiles),
     topicDir: normalizeDirForMode(settings.topicDir, defaults.topicDir, workspaceMode),
     inboxDir: normalizeDirForMode(settings.inboxDir, defaults.inboxDir, workspaceMode),
+    inboxDirs: normalizeInboxDirs(settings.inboxDirs, workspaceMode),
     archiveDir: normalizeDirForMode(settings.archiveDir, defaults.archiveDir, workspaceMode),
     calendarProvider: normalizeCalendarProvider(settings.calendarProvider, defaults.calendarProvider),
     larkCalendarId: String(settings.larkCalendarId || defaults.larkCalendarId).trim(),
@@ -173,6 +186,7 @@ function getVaultProfile(settings, vaultRoot) {
     return {
       topicDir: normalized.topicDir,
       inboxDir: normalized.inboxDir,
+      ...(normalized.inboxDirs.length ? { inboxDirs: normalized.inboxDirs } : {}),
       archiveDir: normalized.archiveDir,
       wikiDir: normalized.wikiDir,
       wikiIndexPath: normalized.wikiIndexPath,
@@ -187,15 +201,25 @@ function resolvePlannerPaths(settings) {
   if (normalized.workspaceMode === 'standalone') {
     const topicDir = path.resolve(normalized.topicDir);
     const inboxDir = path.resolve(normalized.inboxDir);
+    const inboxDirs = [
+      inboxDir,
+      ...normalized.inboxDirs.map((d) => path.resolve(d)),
+    ];
     const archiveRoot = path.resolve(normalized.archiveDir);
     // Use the filesystem root so path.relative(vaultRoot, ...) still produces valid strings
     const vaultRoot = path.parse(topicDir).root;
-    return { vaultRoot, topicDir, inboxDir, archiveRoot, wikiRoot: topicDir, wikiIndexPath: '', wikiLogPath: '' };
+    return { vaultRoot, topicDir, inboxDir, inboxDirs, archiveRoot, wikiRoot: topicDir, wikiIndexPath: '', wikiLogPath: '' };
   }
+  const inboxDir = path.join(normalized.vaultRoot, normalized.inboxDir);
+  const inboxDirs = [
+    inboxDir,
+    ...normalized.inboxDirs.map((d) => path.join(normalized.vaultRoot, d)),
+  ];
   return {
     vaultRoot: normalized.vaultRoot,
     topicDir: path.join(normalized.vaultRoot, normalized.topicDir),
-    inboxDir: path.join(normalized.vaultRoot, normalized.inboxDir),
+    inboxDir,
+    inboxDirs,
     archiveRoot: path.join(normalized.vaultRoot, normalized.archiveDir),
     wikiRoot: path.join(normalized.vaultRoot, normalized.wikiDir),
     wikiIndexPath: path.join(normalized.vaultRoot, normalized.wikiIndexPath),

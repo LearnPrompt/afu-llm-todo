@@ -32,7 +32,10 @@ async function checkFile(label, filePath) {
 
 await checkDir('Vault 根目录', paths.vaultRoot);
 await checkDir('选题目录', paths.topicDir);
-await checkDir('收件箱目录', paths.inboxDir);
+for (let i = 0; i < paths.inboxDirs.length; i++) {
+  const label = paths.inboxDirs.length === 1 ? '收件箱目录' : `收件箱目录 ${i + 1}`;
+  await checkDir(label, paths.inboxDirs[i]);
+}
 await checkDir('归档目录', paths.archiveRoot);
 await checkDir('Wiki 目录', paths.wikiRoot);
 await checkFile('Wiki Index', paths.wikiIndexPath);

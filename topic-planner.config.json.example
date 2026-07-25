@@ -5,6 +5,7 @@
     "/Users/yourname/ObsidianVault": {
       "topicDir": "15_自媒体/选题库",
       "inboxDir": "00_收件箱",
+      "inboxDirs": [],
       "archiveDir": "99_系统/归档/选题占位",
       "wikiDir": "30_研究/内容Wiki",
       "wikiIndexPath": "30_研究/内容Wiki/index.md",
@@ -13,6 +14,7 @@
   },
   "topicDir": "15_自媒体/选题库",
   "inboxDir": "00_收件箱",
+  "inboxDirs": [],
   "archiveDir": "99_系统/归档/选题占位",
   "wikiMode": "off",
   "wikiDir": "30_研究/内容Wiki",

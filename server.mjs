@@ -280,6 +280,11 @@ async function savePlannerSettingsPayload(payload) {
     if (!topicDir || !inboxDir || !archiveDir) {
       throw badRequest("首次使用这个 Vault 时，请先选择选题、收件箱和归档目录");
     }
+    const inboxDirs = Array.isArray(payload.inboxDirs)
+      ? payload.inboxDirs
+          .map((d) => validateVaultRelativeDirectory(d, "额外收件箱目录"))
+          .filter(Boolean)
+      : [];
     const profileWikiDir = optionalString(existingProfile.wikiDir);
     const wikiDirSource = switchingVault && profileWikiDir
       ? profileWikiDir
@@ -300,6 +305,7 @@ async function savePlannerSettingsPayload(payload) {
     nextPayload.vaultRoot = vaultRoot;
     nextPayload.topicDir = topicDir;
     nextPayload.inboxDir = inboxDir;
+    nextPayload.inboxDirs = inboxDirs;
     nextPayload.archiveDir = archiveDir;
     nextPayload.wikiDir = wikiDir;
     nextPayload.wikiIndexPath = wikiIndexPath;
@@ -307,6 +313,7 @@ async function savePlannerSettingsPayload(payload) {
     nextPayload.vaultProfiles[vaultRoot] = {
       topicDir,
       inboxDir,
+      ...(inboxDirs.length ? { inboxDirs } : {}),
       archiveDir,
       wikiDir,
       wikiIndexPath,
@@ -328,6 +335,7 @@ function buildVaultProfileFromSettings(settings) {
   return {
     topicDir: settings.topicDir,
     inboxDir: settings.inboxDir,
+    inboxDirs: settings.inboxDirs || [],
     archiveDir: settings.archiveDir,
     wikiDir: settings.wikiDir,
     wikiIndexPath: settings.wikiIndexPath,
@@ -378,7 +386,7 @@ async function selectPlannerDirectory(payload) {
       vault: {
         vaultRoot: result.path,
         configured: Boolean(profile),
-        directories: profile || { topicDir: "", inboxDir: "", archiveDir: "" },
+        directories: profile || { topicDir: "", inboxDir: "", inboxDirs: [], archiveDir: "" },
       },
     };
   }
@@ -402,14 +410,19 @@ async function buildDiagnosticsPayload() {
     await pushDirCheck(checks, "Vault 根目录", paths.vaultRoot);
   }
   await pushDirCheck(checks, "选题目录", paths.topicDir);
-  await pushDirCheck(checks, "收件箱目录", paths.inboxDir);
+  for (let i = 0; i < paths.inboxDirs.length; i++) {
+    const label = paths.inboxDirs.length === 1 ? "收件箱目录" : `收件箱目录 ${i + 1}`;
+    await pushDirCheck(checks, label, paths.inboxDirs[i]);
+  }
   await pushDirCheck(checks, "归档目录", paths.archiveRoot);
   await pushOptionalDirCheck(checks, "Wiki 目录", paths.wikiRoot);
   await pushOptionalFileCheck(checks, "Wiki Index", paths.wikiIndexPath);
   await pushOptionalFileCheck(checks, "Wiki Log", paths.wikiLogPath);
 
   const topicCount = checks.find((item) => item.label === "选题目录")?.count || 0;
-  const inboxCount = checks.find((item) => item.label === "收件箱目录")?.recursiveMarkdownCount || 0;
+  const inboxCount = checks
+    .filter((item) => item.label.startsWith("收件箱目录"))
+    .reduce((sum, item) => sum + (item.recursiveMarkdownCount || 0), 0);
   const topics = await listTopics();
   const inboxAnalysis = await analyzeInboxCandidates(topics);
   const failed = checks.filter((item) => !item.ok);
@@ -526,8 +539,11 @@ async function listInboxCandidates(existingTopics = []) {
 }
 
 async function analyzeInboxCandidates(existingTopics = []) {
-  const { inboxDir, vaultRoot } = await getPlannerPaths();
-  const files = await listMarkdownFiles(inboxDir);
+  const { inboxDirs, vaultRoot } = await getPlannerPaths();
+  const files = [];
+  for (const dir of inboxDirs) {
+    files.push(...(await listMarkdownFiles(dir)));
+  }
   const takenPaths = new Set(existingTopics.map((topic) => optionalString(topic.sourceInboxPath || "")).filter(Boolean));
   const takenUrls = new Set(existingTopics.map((topic) => optionalString(topic.sourceUrl || "")).filter(Boolean));
   const candidates = [];
@@ -882,9 +898,12 @@ async function reserveTopicPath(filename) {
 }
 
 async function resolveInboxPath(relPath) {
-  const { vaultRoot, inboxDir } = await getPlannerPaths();
+  const { vaultRoot, inboxDirs } = await getPlannerPaths();
   const absolute = path.resolve(vaultRoot, relPath);
-  if (!absolute.startsWith(inboxDir + path.sep) && absolute !== inboxDir) {
+  const isValid = inboxDirs.some((dir) =>
+    absolute.startsWith(dir + path.sep) || absolute === dir,
+  );
+  if (!isValid) {
     throw badRequest("收件箱路径不合法");
   }
   return absolute;

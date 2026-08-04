@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  applyInboxCandidateEdits,
+  buildInboxArchiveRelativePath,
   buildTopicDraftFromInbox,
   deriveInboxCandidate,
   makeTopicFilename,
@@ -102,9 +104,57 @@ test('buildTopicDraftFromInbox creates planner-compatible topic card markdown', 
   assert.match(draft.content, /\[\[00_收件箱\/2026-04-18\/宝玉- Anthropic 自家设计师 Ryan Mather，一人负责公司 7 个产品\.md\]\]/);
 });
 
+test('applyInboxCandidateEdits overrides the transfer copy without mutating the source candidate', () => {
+  const candidate = deriveInboxCandidate({
+    filePath: sampleInboxPath,
+    raw: sampleInboxRaw,
+  });
+  const edited = applyInboxCandidateEdits(candidate, {
+    title: '人工确认后的标题',
+    excerpt: '人工补充后的正文内容，转卡时直接使用。',
+  });
+
+  assert.equal(candidate.title.includes('Ryan Mather'), true);
+  assert.equal(edited.title, '人工确认后的标题');
+  assert.equal(edited.excerpt, '人工补充后的正文内容，转卡时直接使用。');
+
+  const draft = buildTopicDraftFromInbox(edited, '2026-08-04');
+  assert.equal(draft.filename, '【选题】人工确认后的标题.md');
+  assert.match(draft.content, /为什么值得看：人工补充后的正文内容，转卡时直接使用。/);
+  assert.match(draft.content, new RegExp(sampleInboxPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
+test('applyInboxCandidateEdits rejects empty or oversized user edits', () => {
+  const candidate = deriveInboxCandidate({
+    filePath: sampleInboxPath,
+    raw: sampleInboxRaw,
+  });
+
+  assert.throws(() => applyInboxCandidateEdits(candidate, { title: '   ' }), /标题不能为空/);
+  assert.throws(() => applyInboxCandidateEdits(candidate, { excerpt: 'x'.repeat(2001) }), /2000/);
+});
+
 test('makeTopicFilename sanitizes path-hostile characters', () => {
   const filename = makeTopicFilename('Figma/Claude: Design? 太猛了');
   assert.equal(filename, '【选题】Figma-Claude- Design- 太猛了.md');
+});
+
+test('buildInboxArchiveRelativePath preserves inbox nesting under the archive year', () => {
+  const result = buildInboxArchiveRelativePath({
+    sourcePath: '/vault/00_收件箱/2026-08-04/待判断.md',
+    inboxRoot: '/vault/00_收件箱',
+    year: '2026',
+  });
+
+  assert.equal(result, '2026/收件箱/2026-08-04/待判断.md');
+});
+
+test('buildInboxArchiveRelativePath rejects files outside the configured inbox', () => {
+  assert.throws(() => buildInboxArchiveRelativePath({
+    sourcePath: '/vault/15_自媒体/选题库/越界.md',
+    inboxRoot: '/vault/00_收件箱',
+    year: '2026',
+  }), /只能归档收件箱目录内的文件/);
 });
 
 test('normalizeUrl strips utm_ params regardless of order', () => {

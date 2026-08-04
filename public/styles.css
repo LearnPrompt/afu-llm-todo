@@ -1032,6 +1032,28 @@ button:disabled {
   flex: 0 0 auto;
 }
 
+.inbox-source-link {
+  min-width: 0;
+  color: inherit;
+  text-decoration-color: rgba(182, 82, 45, 0.34);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.inbox-source-link::after {
+  content: "  ⌘↗";
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.inbox-source-link:hover,
+.inbox-source-link:focus-visible {
+  color: var(--accent);
+  text-decoration-color: currentColor;
+}
+
 .inbox-card {
   padding: 14px;
   border-radius: 16px;
@@ -1043,6 +1065,61 @@ button:disabled {
   margin: 0 0 8px;
   font-size: 15px;
   line-height: 1.35;
+}
+
+.inbox-editable {
+  margin-left: -5px !important;
+  margin-right: -5px !important;
+  padding: 5px;
+  border-radius: 9px;
+  cursor: text;
+  transition: background 140ms ease, box-shadow 140ms ease;
+}
+
+.inbox-editable:hover,
+.inbox-editable:focus-visible {
+  background: rgba(182, 82, 45, 0.07);
+  box-shadow: inset 0 0 0 1px rgba(182, 82, 45, 0.14);
+}
+
+.inbox-editable.is-editing {
+  padding: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.inbox-inline-editor {
+  width: 100%;
+  min-height: 42px;
+  padding: 9px 10px;
+  border: 1px solid rgba(182, 82, 45, 0.42);
+  border-radius: 10px;
+  color: var(--text);
+  background: var(--panel-strong);
+  box-shadow: 0 0 0 3px rgba(182, 82, 45, 0.1);
+  font: inherit;
+  line-height: inherit;
+  resize: vertical;
+}
+
+textarea.inbox-inline-editor {
+  min-height: 96px;
+}
+
+.inbox-edit-hint {
+  margin-top: 7px !important;
+  color: #8b755d !important;
+  font-size: 11px !important;
+}
+
+.inbox-card.has-user-edits {
+  border-color: rgba(182, 82, 45, 0.28);
+  box-shadow: inset 0 0 0 1px rgba(182, 82, 45, 0.05);
+}
+
+.inbox-card.has-user-edits .inbox-edit-hint {
+  color: var(--accent) !important;
+  font-weight: 700;
 }
 
 .inbox-card p {

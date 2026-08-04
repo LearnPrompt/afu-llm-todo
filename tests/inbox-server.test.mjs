@@ -81,7 +81,7 @@ test('inbox scan dedupes candidates that normalize to the same URL, keeping the 
   }
 });
 
-test('POST /api/inbox/dismiss marks the file processed and removes it from candidates', async () => {
+test('POST /api/inbox/dismiss archives the file and removes it from candidates', async () => {
   const server = await spawnPlannerServer();
   try {
     const relPath = await writeInboxFile(
@@ -93,7 +93,7 @@ test('POST /api/inbox/dismiss marks the file processed and removes it from candi
         'url: https://example.com/to-dismiss',
         '---',
         '',
-        '这条素材足够长，应该正常出现在候选列表中，直到被标记为已处理为止。',
+        '这条素材足够长，应该正常出现在候选列表中，直到被归档为止。',
       ].join('\n'),
     );
 
@@ -107,8 +107,9 @@ test('POST /api/inbox/dismiss marks the file processed and removes it from candi
     assert.equal(status, 200);
     assert.equal(json.ok, true);
 
-    const raw = await fs.readFile(path.join(server.vaultRoot, relPath), 'utf8');
-    assert.match(raw, /^status: processed$/m);
+    await assert.rejects(fs.access(path.join(server.vaultRoot, relPath)));
+    assert.match(json.archivePath, /^99_系统\/归档\/行动卡片\/\d{4}\/收件箱\/待删除\.md$/);
+    const raw = await fs.readFile(path.join(server.vaultRoot, json.archivePath), 'utf8');
     assert.match(raw, /url: https:\/\/example\.com\/to-dismiss/);
 
     const after = await server.request('/api/topics');
@@ -133,6 +134,45 @@ test('POST /api/inbox/refetch rejects candidates with no recoverable link', asyn
     });
     assert.equal(status, 400);
     assert.match(json.error, /人工补链接/);
+  } finally {
+    await server.close();
+  }
+});
+
+test('POST /api/inbox/import applies manual title and body only to the generated card', async () => {
+  const server = await spawnPlannerServer();
+  try {
+    const relPath = await writeInboxFile(
+      server,
+      '待修改.md',
+      [
+        '---',
+        'title: 原始标题',
+        'url: https://example.com/manual-edit',
+        '---',
+        '',
+        '这是原始素材正文，长度足够用于候选提取，也用于确认收件箱原文不会被覆盖。',
+      ].join('\n'),
+    );
+
+    const { status, json } = await server.request('/api/inbox/import', {
+      method: 'POST',
+      body: JSON.stringify({
+        sourcePath: relPath,
+        title: '用户修改后的标题',
+        excerpt: '用户修改后的内容，只写入生成的选题卡。',
+      }),
+    });
+    assert.equal(status, 200);
+    assert.equal(json.ok, true);
+
+    const generated = await fs.readFile(path.join(server.vaultRoot, json.created), 'utf8');
+    assert.match(generated, /用户修改后的标题/);
+    assert.match(generated, /用户修改后的内容，只写入生成的选题卡。/);
+
+    const source = await fs.readFile(path.join(server.vaultRoot, relPath), 'utf8');
+    assert.match(source, /title: 原始标题/);
+    assert.doesNotMatch(source, /用户修改后的标题/);
   } finally {
     await server.close();
   }

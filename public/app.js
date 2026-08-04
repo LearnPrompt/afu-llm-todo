@@ -1,5 +1,6 @@
 const BACKLOG_PAGE_SIZE_KEY = "topic-planner.backlog-page-size";
 const INBOX_PAGE_SIZE_KEY = "topic-planner.inbox-page-size";
+const INBOX_CANDIDATE_EDITS_KEY = "topic-planner.inbox-candidate-edits.v1";
 const DEFAULT_BACKLOG_PAGE_SIZE = 3;
 const DEFAULT_INBOX_PAGE_SIZE = 20;
 const RECOMMENDED_DAILY_CAPACITY = 2;
@@ -37,6 +38,7 @@ const state = {
   backlogPageSize: readStoredBacklogPageSize(),
   inboxPage: 1,
   inboxPageSize: readStoredInboxPageSize(),
+  inboxCandidateEdits: readStoredInboxCandidateEdits(),
   selectedInboxPaths: new Set(),
   lastCreatedTopic: null,
   recentTopicPaths: [],
@@ -429,6 +431,7 @@ async function loadTopics() {
       elements.inboxPageSize.value = "5";
     }
     pruneSelectedInboxPaths();
+    pruneInboxCandidateEdits();
     render();
     maybeOpenDailyInboxDialog();
   } catch (error) {
@@ -1632,14 +1635,17 @@ function createTopicCard(topic, options = {}) {
 }
 
 function createInboxCandidateCard(candidate) {
+  const displayCandidate = getInboxCandidateWithEdits(candidate);
   const card = document.createElement('article');
   card.className = 'inbox-card';
   card.dataset.sourcePath = candidate.sourcePath;
+  card.classList.toggle('has-user-edits', hasInboxCandidateEdits(candidate.sourcePath));
 
-  const selectLine = document.createElement('label');
+  const selectLine = document.createElement('div');
   selectLine.className = 'inbox-select-line';
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
+  checkbox.setAttribute('aria-label', `选择 ${displayCandidate.title}`);
   checkbox.checked = state.selectedInboxPaths.has(candidate.sourcePath);
   checkbox.addEventListener('change', () => {
     if (checkbox.checked) {
@@ -1649,13 +1655,27 @@ function createInboxCandidateCard(candidate) {
     }
     renderInboxCandidates();
   });
-  const source = document.createElement('span');
+  const sourceUri = obsidianOpenUri(candidate.sourcePath);
+  const source = document.createElement(sourceUri ? 'a' : 'span');
   source.textContent = candidate.sourcePath;
+  if (sourceUri) {
+    source.className = 'inbox-source-link';
+    source.href = sourceUri;
+    source.title = '点击或 Cmd + 点击，在 Obsidian 中打开原始文件';
+    source.addEventListener('click', (event) => event.stopPropagation());
+  }
   selectLine.append(checkbox, source);
   card.append(selectLine);
 
   const title = document.createElement('h3');
-  title.textContent = candidate.title;
+  title.textContent = displayCandidate.title;
+  bindInboxCandidateEditor(title, {
+    label: '标题',
+    multiline: false,
+    maxLength: 160,
+    getValue: () => getInboxCandidateWithEdits(candidate).title,
+    onSave: (value) => updateInboxCandidateEdit(candidate, 'title', value),
+  });
   card.append(title);
 
   const meta = document.createElement('div');
@@ -1669,8 +1689,20 @@ function createInboxCandidateCard(candidate) {
   card.append(meta);
 
   const excerpt = document.createElement('p');
-  excerpt.textContent = candidate.excerpt || '只有基础信息也没关系，先让阿福帮你转卡，再补判断。';
+  excerpt.textContent = displayCandidate.excerpt || '只有基础信息也没关系，先让阿福帮你转卡，再补判断。';
+  bindInboxCandidateEditor(excerpt, {
+    label: '内容',
+    multiline: true,
+    maxLength: 2000,
+    getValue: () => getInboxCandidateWithEdits(candidate).excerpt,
+    onSave: (value) => updateInboxCandidateEdit(candidate, 'excerpt', value),
+  });
   card.append(excerpt);
+
+  const editHint = document.createElement('p');
+  editHint.className = 'inbox-edit-hint';
+  updateInboxEditHint(editHint, candidate.sourcePath);
+  card.append(editHint);
 
   if ((candidate.reasons || []).length) {
     const reason = document.createElement('p');
@@ -1710,7 +1742,10 @@ function createInboxCandidateCard(candidate) {
     okBtn.type = 'button';
     okBtn.className = 'mini-btn accent-btn';
     okBtn.textContent = '确认';
-    okBtn.addEventListener('click', () => { bar.remove(); importInboxCandidate(candidate); });
+    okBtn.addEventListener('click', () => {
+      bar.remove();
+      importInboxCandidate(getInboxCandidateWithEdits(candidate));
+    });
     bar.append(msg, cancelBtn, okBtn);
     actions.append(bar);
   });
@@ -1726,7 +1761,7 @@ function createInboxCandidateCard(candidate) {
     const bar = document.createElement('div');
     bar.className = 'inline-confirm';
     const msg = document.createElement('span');
-    msg.textContent = '标记为已处理并从收件箱移除？原文件不会被删除。';
+    msg.textContent = '确认移到归档？原文件不会永久删除。';
     const cancelBtn = document.createElement('button');
     cancelBtn.type = 'button';
     cancelBtn.className = 'mini-btn';
@@ -1736,7 +1771,7 @@ function createInboxCandidateCard(candidate) {
     okBtn.type = 'button';
     okBtn.className = 'mini-btn accent-btn';
     okBtn.textContent = '确认';
-    okBtn.addEventListener('click', () => { bar.remove(); dismissInboxCandidate(candidate); });
+    okBtn.addEventListener('click', () => { bar.remove(); archiveInboxCandidate(candidate); });
     bar.append(msg, cancelBtn, okBtn);
     actions.append(bar);
   });
@@ -1757,6 +1792,107 @@ function createInboxCandidateCard(candidate) {
   card.append(actions);
 
   return card;
+}
+
+function bindInboxCandidateEditor(element, options) {
+  element.classList.add('inbox-editable');
+  element.tabIndex = 0;
+  element.title = `双击修改${options.label}`;
+
+  const beginEditing = () => {
+    if (element.classList.contains('is-editing')) return;
+    const originalValue = options.getValue();
+    const editor = document.createElement(options.multiline ? 'textarea' : 'input');
+    editor.className = 'inbox-inline-editor';
+    editor.value = originalValue;
+    editor.maxLength = options.maxLength;
+    editor.setAttribute('aria-label', `修改${options.label}`);
+    if (!options.multiline) editor.type = 'text';
+
+    let finished = false;
+    const finish = (save) => {
+      if (finished) return;
+      finished = true;
+      const nextValue = editor.value.replace(/\s+/g, ' ').trim();
+      const validValue = nextValue || originalValue;
+      if (save && !nextValue) {
+        showToast(`${options.label}不能为空，已保留原内容。`);
+      } else if (save && nextValue !== originalValue) {
+        options.onSave(nextValue);
+      }
+      element.textContent = save ? validValue : originalValue;
+      element.classList.remove('is-editing');
+      element.focus();
+    };
+
+    editor.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(false);
+        return;
+      }
+      const shouldSave = options.multiline
+        ? event.key === 'Enter' && (event.metaKey || event.ctrlKey)
+        : event.key === 'Enter';
+      if (shouldSave) {
+        event.preventDefault();
+        finish(true);
+      }
+    });
+    editor.addEventListener('blur', () => finish(true));
+
+    element.classList.add('is-editing');
+    element.replaceChildren(editor);
+    editor.focus();
+    editor.select();
+  };
+
+  element.addEventListener('dblclick', beginEditing);
+  element.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === 'F2') {
+      event.preventDefault();
+      beginEditing();
+    }
+  });
+}
+
+function getInboxCandidateWithEdits(candidate) {
+  return {
+    ...candidate,
+    ...(state.inboxCandidateEdits.get(candidate.sourcePath) || {}),
+  };
+}
+
+function hasInboxCandidateEdits(sourcePath) {
+  return Object.keys(state.inboxCandidateEdits.get(sourcePath) || {}).length > 0;
+}
+
+function updateInboxCandidateEdit(candidate, field, value) {
+  const edits = { ...(state.inboxCandidateEdits.get(candidate.sourcePath) || {}) };
+  if (value === candidate[field]) {
+    delete edits[field];
+  } else {
+    edits[field] = value;
+  }
+  if (Object.keys(edits).length) {
+    state.inboxCandidateEdits.set(candidate.sourcePath, edits);
+  } else {
+    state.inboxCandidateEdits.delete(candidate.sourcePath);
+  }
+  persistInboxCandidateEdits();
+
+  const cards = document.querySelectorAll(`[data-source-path="${CSS.escape(candidate.sourcePath)}"]`);
+  for (const card of cards) {
+    card.classList.toggle('has-user-edits', hasInboxCandidateEdits(candidate.sourcePath));
+    const hint = card.querySelector('.inbox-edit-hint');
+    if (hint) updateInboxEditHint(hint, candidate.sourcePath);
+  }
+}
+
+function updateInboxEditHint(element, sourcePath) {
+  element.textContent = hasInboxCandidateEdits(sourcePath)
+    ? '已人工修改；转卡时使用此版本，收件箱原文不变。'
+    : '双击标题或正文可修改；只影响转卡结果。';
 }
 
 function bindDropZone(column, dateIso) {
@@ -2228,7 +2364,11 @@ async function importInboxCandidate(candidate) {
     const response = await fetch('/api/inbox/import', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sourcePath: candidate.sourcePath }),
+      body: JSON.stringify({
+        sourcePath: candidate.sourcePath,
+        title: candidate.title,
+        excerpt: candidate.excerpt,
+      }),
     });
     const data = await response.json();
     if (!response.ok) {
@@ -2240,6 +2380,8 @@ async function importInboxCandidate(candidate) {
     rememberCreatedTopics([state.lastCreatedTopic]);
     clearBacklogFilters();
     state.selectedInboxPaths.delete(candidate.sourcePath);
+    state.inboxCandidateEdits.delete(candidate.sourcePath);
+    persistInboxCandidateEdits();
     await loadTopics();
     state.workspaceView = "inbox";
     renderWorkspaceView();
@@ -2256,20 +2398,26 @@ async function importInboxCandidate(candidate) {
   }
 }
 
-async function dismissInboxCandidate(candidate) {
+async function archiveInboxCandidate(candidate) {
   setBusy(true);
   try {
-    const response = await fetch('/api/inbox/dismiss', {
+    const response = await fetch('/api/inbox/archive', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sourcePath: candidate.sourcePath }),
+      body: JSON.stringify({
+        sourcePath: candidate.sourcePath,
+        reason: '转卡前主动删除',
+      }),
     });
     const data = await response.json();
     if (!response.ok) {
-      throw new Error(data.error || '删除失败');
+      throw new Error(data.error || '归档失败');
     }
-    state.inboxCandidates = (state.inboxCandidates || []).filter((item) => item.sourcePath !== candidate.sourcePath);
-    renderInboxCandidates();
+    state.selectedInboxPaths.delete(candidate.sourcePath);
+    state.inboxCandidateEdits.delete(candidate.sourcePath);
+    persistInboxCandidateEdits();
+    await loadTopics();
+    showToast(`已归档：${data.archivePath || candidate.title}`);
   } catch (error) {
     alert(error.message);
   } finally {
@@ -2320,7 +2468,13 @@ async function importSelectedInboxCandidates(sourcePaths = Array.from(state.sele
     const response = await fetch('/api/inbox/import-batch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sourcePaths }),
+      body: JSON.stringify({
+        sourcePaths,
+        overrides: sourcePaths.map((sourcePath) => ({
+          sourcePath,
+          ...(state.inboxCandidateEdits.get(sourcePath) || {}),
+        })),
+      }),
     });
     const data = await response.json();
     if (!response.ok && !(data.created || []).length) {
@@ -2329,7 +2483,9 @@ async function importSelectedInboxCandidates(sourcePaths = Array.from(state.sele
 
     for (const item of data.created || []) {
       state.selectedInboxPaths.delete(item.sourcePath);
+      state.inboxCandidateEdits.delete(item.sourcePath);
     }
+    persistInboxCandidateEdits();
     const lastCreated = (data.created || []).at(-1);
     if (lastCreated) {
       state.lastCreatedTopic = {
@@ -2517,6 +2673,18 @@ function pruneSelectedInboxPaths() {
       state.selectedInboxPaths.delete(sourcePath);
     }
   }
+}
+
+function pruneInboxCandidateEdits() {
+  const available = new Set((state.inboxCandidates || []).map((candidate) => candidate.sourcePath));
+  let changed = false;
+  for (const sourcePath of Array.from(state.inboxCandidateEdits.keys())) {
+    if (!available.has(sourcePath)) {
+      state.inboxCandidateEdits.delete(sourcePath);
+      changed = true;
+    }
+  }
+  if (changed) persistInboxCandidateEdits();
 }
 
 function showTopicToast(message, topic) {
@@ -3194,6 +3362,22 @@ function readInboxPageSizeValue(value) {
 
 function readStoredInboxPageSize() {
   return readInboxPageSizeValue(window.localStorage.getItem(INBOX_PAGE_SIZE_KEY));
+}
+
+function readStoredInboxCandidateEdits() {
+  try {
+    const entries = JSON.parse(window.localStorage.getItem(INBOX_CANDIDATE_EDITS_KEY) || '[]');
+    return new Map(Array.isArray(entries) ? entries : []);
+  } catch {
+    return new Map();
+  }
+}
+
+function persistInboxCandidateEdits() {
+  window.localStorage.setItem(
+    INBOX_CANDIDATE_EDITS_KEY,
+    JSON.stringify(Array.from(state.inboxCandidateEdits.entries())),
+  );
 }
 
 function setBusy(busy) {

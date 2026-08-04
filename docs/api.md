@@ -2,6 +2,12 @@
 
 Afu 的网页 UI 使用本地 HTTP API。默认端口是 `4317`。
 
+页面：
+
+- `GET /`：桌面工作台
+- `GET /quick`：手机快速排期
+- `GET /quick?view=workspace`：从手机返回响应式工作台
+
 核心：
 
 - `GET /api/topics`
@@ -16,6 +22,13 @@ Afu 的网页 UI 使用本地 HTTP API。默认端口是 `4317`。
 - `GET /api/inbox-candidates`
 - `POST /api/inbox/import`
 - `POST /api/inbox/import-batch`
+- `POST /api/inbox/archive`
+
+单条和批量导入允许传入用户手动修改后的 `title` 与 `excerpt`。修改只作用于即将生成的选题卡，不会改写收件箱原文。
+
+`/api/inbox/archive` 不永久删除素材，而是将文件移动到 `archiveRoot/<年份>/收件箱/<原相对路径>`；同名文件会自动追加 `-02`、`-03` 等序号。
+
+收件箱列表中的来源路径使用 Obsidian URI。按住 Cmd 点击可直接在 Obsidian 打开对应文件。
 
 Wiki Mode：
 

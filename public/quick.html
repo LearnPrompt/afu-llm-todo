@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#f7efe4" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="阿福 Quick" />
+    <meta name="format-detection" content="telephone=no" />
+    <title>阿福 Quick · 快速过卡</title>
+    <link rel="manifest" href="/quick-manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/quick-icon-180.png" />
+    <link rel="icon" href="/quick-icon-192.png" type="image/png" />
+    <link rel="stylesheet" href="/quick.css" />
+  </head>
+  <body>
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
+
+    <div class="quick-shell">
+      <header class="topbar">
+        <div class="brand">
+          <img src="/quick-icon-192.png" width="44" height="44" alt="" />
+          <div>
+            <p id="brandKicker">AFU · QUICK REVIEW</p>
+            <h1 id="brandTitle">快速过卡</h1>
+          </div>
+        </div>
+        <a id="workspaceLink" class="workspace-link" href="/quick?view=workspace" aria-label="打开手机工作台">
+          <span id="workspaceLinkLabel">工作台</span>
+          <span id="workspaceLinkIcon" aria-hidden="true">↗</span>
+        </a>
+      </header>
+
+      <section class="session-status" aria-label="本轮进度">
+        <div class="status-copy">
+          <strong id="progressText">正在叫醒阿福…</strong>
+          <span id="syncStatus">连接本地 Vault</span>
+        </div>
+        <div class="progress-track" aria-hidden="true">
+          <span id="progressBar"></span>
+        </div>
+      </section>
+
+      <section id="installHint" class="install-hint" hidden>
+        <div>
+          <strong>放到手机主屏</strong>
+          <p>Safari 点“共享”，再选“添加到主屏幕”。</p>
+        </div>
+        <button id="dismissInstallHint" type="button" aria-label="关闭提示">×</button>
+      </section>
+
+      <main id="reviewStage" class="review-stage" aria-live="polite">
+        <section id="loadingState" class="loading-state">
+          <div class="loading-card" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <p>阿福正在整理待排期卡片</p>
+        </section>
+
+        <section id="emptyState" class="empty-state" hidden>
+          <div class="empty-seal" aria-hidden="true">✓</div>
+          <p class="kicker">本轮已过完</p>
+          <h2 id="emptyTitle">桌面清爽了</h2>
+          <p id="emptyCopy">没有待排期卡片。</p>
+          <button id="reviewLaterBtn" class="secondary-button" type="button" hidden>再看跳过卡片</button>
+          <button id="refreshEmptyBtn" class="text-button" type="button">重新检查</button>
+        </section>
+
+        <section id="cardDeck" class="card-deck" hidden>
+          <article id="nextCard" class="todo-card next-card" aria-hidden="true"></article>
+          <article id="currentCard" class="todo-card current-card">
+            <div class="card-topline">
+              <span id="priorityBadge" class="priority-badge"></span>
+              <span id="stageBadge" class="stage-badge"></span>
+            </div>
+            <h2 id="topicTitle"></h2>
+            <p id="topicExcerpt" class="topic-excerpt"></p>
+            <div id="topicReason" class="topic-reason" hidden>
+              <span>WHY NOW</span>
+              <p></p>
+            </div>
+            <div id="topicTags" class="topic-tags"></div>
+            <footer class="card-footer">
+              <span id="topicUpdated"></span>
+              <span id="queuePosition"></span>
+            </footer>
+          </article>
+        </section>
+      </main>
+
+      <section id="actionDock" class="action-dock" hidden aria-label="排期操作">
+        <div class="primary-actions">
+          <button class="schedule-action today-action" type="button" data-schedule-kind="today">
+            <span class="action-icon" aria-hidden="true">☀</span>
+            <strong>今天</strong>
+            <small id="todayHint">寻找空档</small>
+          </button>
+          <button class="schedule-action tomorrow-action" type="button" data-schedule-kind="tomorrow">
+            <span class="action-icon" aria-hidden="true">→</span>
+            <strong>明天</strong>
+            <small id="tomorrowHint">寻找空档</small>
+          </button>
+        </div>
+        <div class="secondary-actions">
+          <button class="compact-action week-action" type="button" data-schedule-kind="week">
+            <span aria-hidden="true">▦</span>
+            <strong>本周</strong>
+            <small id="weekHint">选择日期</small>
+          </button>
+          <button id="laterBtn" class="compact-action later-action" type="button">
+            <span aria-hidden="true">↻</span>
+            <strong>跳过</strong>
+            <small>本轮不处理</small>
+          </button>
+          <button id="rejectBtn" class="compact-action reject-action" type="button">
+            <span aria-hidden="true">×</span>
+            <strong>拒绝</strong>
+            <small>说明原因</small>
+          </button>
+        </div>
+      </section>
+
+      <main id="workspaceView" class="mobile-workspace" hidden>
+        <section class="workspace-summary">
+          <div>
+            <p class="kicker">MOBILE WORKSPACE</p>
+            <h2>排期工作台</h2>
+          </div>
+          <p>在手机上查看、改期或取消排期。收件箱、Wiki 和设置仍保留在桌面端。</p>
+        </section>
+
+        <nav class="workspace-tabs" aria-label="手机工作台视图">
+          <button class="workspace-tab is-active" type="button" data-mobile-workspace-tab="scheduled">
+            已排期 <span id="scheduledCount">0</span>
+          </button>
+          <button class="workspace-tab" type="button" data-mobile-workspace-tab="pending">
+            待排期 <span id="pendingCount">0</span>
+          </button>
+        </nav>
+
+        <section id="scheduledWorkspacePanel" class="workspace-panel">
+          <div id="scheduledWorkspaceList" class="workspace-list"></div>
+        </section>
+        <section id="pendingWorkspacePanel" class="workspace-panel" hidden>
+          <div id="pendingWorkspaceList" class="workspace-list"></div>
+        </section>
+      </main>
+
+      <footer class="connection-footer">
+        <span id="connectionDot" class="connection-dot"></span>
+        <span id="connectionText">正在连接 Mac mini</span>
+      </footer>
+    </div>
+
+    <dialog id="rejectDialog" class="reason-dialog">
+      <form id="rejectForm" method="dialog">
+        <div class="dialog-handle" aria-hidden="true"></div>
+        <p class="kicker">拒绝这张卡</p>
+        <h2 id="rejectTitle">告诉阿福为什么</h2>
+        <div class="reason-grid">
+          <label>
+            <input type="radio" name="rejectReason" value="现在不值得做" checked />
+            <span>不值得做</span>
+          </label>
+          <label>
+            <input type="radio" name="rejectReason" value="时效已经过了" />
+            <span>已经过期</span>
+          </label>
+          <label>
+            <input type="radio" name="rejectReason" value="与现有选题重复" />
+            <span>内容重复</span>
+          </label>
+        </div>
+        <label class="custom-reason">
+          其他原因
+          <input id="customRejectReason" type="text" maxlength="80" placeholder="可选" />
+        </label>
+        <div class="dialog-actions">
+          <button id="cancelRejectBtn" class="secondary-button" type="button">取消</button>
+          <button class="confirm-reject" type="submit">确认拒绝</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="scheduleDialog" class="sheet-dialog">
+      <form id="scheduleForm" method="dialog">
+        <div class="dialog-handle" aria-hidden="true"></div>
+        <div class="sheet-heading">
+          <div>
+            <p class="kicker">选择排期</p>
+            <h2 id="scheduleTitle">先选日期，再选时间</h2>
+          </div>
+          <button id="closeScheduleBtn" class="sheet-close" type="button" aria-label="关闭排期面板">×</button>
+        </div>
+
+        <div class="week-toolbar">
+          <button id="prevScheduleWeekBtn" type="button" aria-label="上一周">←</button>
+          <strong id="scheduleWeekLabel"></strong>
+          <button id="nextScheduleWeekBtn" type="button" aria-label="下一周">→</button>
+        </div>
+        <div id="scheduleWeekDays" class="week-days" aria-label="按周选择日期"></div>
+
+        <label class="date-jump">
+          跳到日期
+          <input id="scheduleDateJump" type="date" />
+        </label>
+
+        <section id="scheduleTimeSection" class="schedule-time-section" hidden>
+          <div class="schedule-section-head">
+            <strong id="selectedDateLabel">选择时间</strong>
+            <span id="selectedDateCapacity"></span>
+          </div>
+          <div id="scheduleSlotButtons" class="schedule-slots"></div>
+          <button id="customTimeBtn" class="custom-time-toggle" type="button">自定义时间</button>
+          <div id="customTimeFields" class="custom-time-fields" hidden>
+            <label>
+              开始
+              <input id="scheduleStart" type="time" />
+            </label>
+            <label>
+              结束
+              <input id="scheduleEnd" type="time" />
+            </label>
+          </div>
+        </section>
+
+        <p id="scheduleError" class="schedule-error" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button id="cancelScheduleBtn" class="secondary-button" type="button">取消</button>
+          <button id="confirmScheduleBtn" class="confirm-schedule" type="submit" disabled>确认排期</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div id="toast" class="toast" role="status" hidden></div>
+
+    <script type="module" src="/quick.js"></script>
+  </body>
+</html>

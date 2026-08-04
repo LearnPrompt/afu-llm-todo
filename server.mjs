@@ -6,7 +6,13 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildTopicDraftFromInbox, deriveInboxCandidate, normalizeUrl } from "./inbox-import.mjs";
+import {
+  applyInboxCandidateEdits,
+  buildInboxArchiveRelativePath,
+  buildTopicDraftFromInbox,
+  deriveInboxCandidate,
+  normalizeUrl,
+} from "./inbox-import.mjs";
 import { suggestMergeGroups } from "./deepseek-client.mjs";
 import {
   buildAppleScriptDate,
@@ -124,7 +130,15 @@ createServer(async (req, res) => {
 
     if (url.pathname === "/api/inbox/dismiss" && req.method === "POST") {
       const body = await readJsonBody(req);
-      return respondJson(res, await setInboxFileProcessed(body.sourcePath));
+      return respondJson(res, await archiveInboxCandidate({
+        ...body,
+        reason: body.reason || "转卡前主动删除",
+      }));
+    }
+
+    if (url.pathname === "/api/inbox/archive" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      return respondJson(res, await archiveInboxCandidate(body));
     }
 
     if (url.pathname === "/api/inbox/refetch" && req.method === "POST") {
@@ -870,7 +884,16 @@ async function importInboxCandidate(payload) {
 
   const absolutePath = await resolveInboxPath(sourcePath);
   const raw = await fs.readFile(absolutePath, "utf8");
-  const candidate = deriveInboxCandidate({ filePath: sourcePath, raw });
+  const derivedCandidate = deriveInboxCandidate({ filePath: sourcePath, raw });
+  let candidate;
+  try {
+    candidate = applyInboxCandidateEdits(derivedCandidate, {
+      ...(payload.title !== undefined ? { title: payload.title } : {}),
+      ...(payload.excerpt !== undefined ? { excerpt: payload.excerpt } : {}),
+    });
+  } catch (error) {
+    throw badRequest(error.message);
+  }
 
   // Dedup: 归一化 URL 完全一致才自动合并。标题相似不再触发自动合并——
   // 抖音/小红书分享标题里「复制打开抖音，看看【…的作品】」这类模板文字
@@ -904,6 +927,8 @@ async function importInboxCandidate(payload) {
   await appendPlannerLog("inbox-import", candidate.title, {
     source: candidate.sourcePath,
     created: path.relative(vaultRoot, targetPath),
+    titleEdited: String(candidate.title !== derivedCandidate.title),
+    excerptEdited: String(candidate.excerpt !== derivedCandidate.excerpt),
   });
 
   return {
@@ -922,9 +947,19 @@ async function importInboxCandidateBatch(payload) {
 
   const created = [];
   const failed = [];
+  const overrides = new Map(
+    (Array.isArray(payload.overrides) ? payload.overrides : [])
+      .map((item) => [optionalString(item?.sourcePath), item])
+      .filter(([sourcePath]) => sourcePath),
+  );
   for (const sourcePath of sourcePaths) {
     try {
-      const result = await importInboxCandidate({ sourcePath });
+      const override = overrides.get(sourcePath) || {};
+      const result = await importInboxCandidate({
+        sourcePath,
+        ...(override.title !== undefined ? { title: override.title } : {}),
+        ...(override.excerpt !== undefined ? { excerpt: override.excerpt } : {}),
+      });
       created.push({
         path: result.created || result.mergedInto,
         title: result.topic?.title || "",
@@ -943,6 +978,40 @@ async function importInboxCandidateBatch(payload) {
     ok: failed.length === 0,
     created,
     failed,
+  };
+}
+
+async function archiveInboxCandidate(payload) {
+  const sourcePath = optionalString(payload.sourcePath);
+  if (!sourcePath) {
+    throw badRequest("必须提供收件箱路径");
+  }
+
+  const { vaultRoot, inboxDir, archiveRoot } = await getPlannerPaths();
+  const absolutePath = await resolveInboxPath(sourcePath);
+  const raw = await fs.readFile(absolutePath, "utf8");
+  const candidate = deriveInboxCandidate({ filePath: sourcePath, raw });
+  const archiveRelativePath = buildInboxArchiveRelativePath({
+    sourcePath: absolutePath,
+    inboxRoot: inboxDir,
+    year: new Date().getFullYear().toString(),
+  });
+  const archivePath = await reserveArchiveFilePath(path.join(archiveRoot, archiveRelativePath));
+  await fs.mkdir(path.dirname(archivePath), { recursive: true });
+  await fs.rename(absolutePath, archivePath);
+
+  const archived = path.relative(vaultRoot, archivePath);
+  await appendPlannerLog("inbox-archive", candidate.title, {
+    source: sourcePath,
+    archivePath: archived,
+    reason: optionalString(payload.reason) || "转卡前主动删除",
+  });
+
+  return {
+    ok: true,
+    archived: true,
+    sourcePath,
+    archivePath: archived,
   };
 }
 
@@ -1129,6 +1198,23 @@ async function reserveTopicPath(filename) {
       attempt += 1;
     } catch {
       return target;
+    }
+  }
+}
+
+async function reserveArchiveFilePath(targetPath) {
+  const ext = path.extname(targetPath);
+  const base = path.basename(targetPath, ext);
+  const dir = path.dirname(targetPath);
+  let attempt = 0;
+  while (true) {
+    const name = attempt === 0 ? `${base}${ext}` : `${base}-${String(attempt + 1).padStart(2, '0')}${ext}`;
+    const candidate = path.join(dir, name);
+    try {
+      await fs.access(candidate);
+      attempt += 1;
+    } catch {
+      return candidate;
     }
   }
 }
@@ -3122,7 +3208,11 @@ async function readJsonBody(req) {
 }
 
 async function serveStatic(pathname, res) {
-  const targetPath = pathname === "/" ? "/index.html" : pathname;
+  const targetPath = pathname === "/"
+    ? "/index.html"
+    : pathname === "/quick"
+      ? "/quick.html"
+      : pathname;
   const filePath = path.join(PUBLIC_DIR, path.normalize(targetPath).replace(/^(\.\.[/\\])+/, ""));
 
   try {
@@ -3141,8 +3231,11 @@ async function serveStatic(pathname, res) {
 function contentType(filePath) {
   if (filePath.endsWith(".html")) return "text/html; charset=utf-8";
   if (filePath.endsWith(".css")) return "text/css; charset=utf-8";
-  if (filePath.endsWith(".js")) return "application/javascript; charset=utf-8";
+  if (filePath.endsWith(".js") || filePath.endsWith(".mjs")) return "application/javascript; charset=utf-8";
+  if (filePath.endsWith(".webmanifest")) return "application/manifest+json; charset=utf-8";
   if (filePath.endsWith(".json")) return "application/json; charset=utf-8";
+  if (filePath.endsWith(".svg")) return "image/svg+xml";
+  if (filePath.endsWith(".png")) return "image/png";
   return "text/plain; charset=utf-8";
 }
 

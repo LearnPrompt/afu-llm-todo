@@ -16,8 +16,17 @@ set -euo pipefail
 
 PORT="${AFU_PORT:-4317}"
 BASE="http://localhost:${PORT}"
-LABEL="com.afu.topic-planner"
-PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
+if [ -f "$HOME/Library/LaunchAgents/pro.learnprompt.afu.plist" ]; then
+  LABEL="pro.learnprompt.afu"
+  PLIST="$HOME/Library/LaunchAgents/pro.learnprompt.afu.plist"
+  LOG_OUT="$HOME/Library/Logs/Afu/server.log"
+  LOG_ERR="$HOME/Library/Logs/Afu/server.error.log"
+else
+  LABEL="com.afu.topic-planner"
+  PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
+  LOG_OUT="$HOME/Library/Logs/afu-topic-planner.log"
+  LOG_ERR="$HOME/Library/Logs/afu-topic-planner.err.log"
+fi
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 healthy() {
@@ -41,7 +50,7 @@ wake() {
     healthy && { echo "afu 已就绪: ${BASE}"; return 0; }
     sleep 0.5
   done
-  echo "唤醒失败。看日志: ~/Library/Logs/afu-topic-planner.err.log 或 /tmp/afu-manual.log" >&2
+  echo "唤醒失败。看日志: ${LOG_ERR} 或 /tmp/afu-manual.log" >&2
   return 1
 }
 
@@ -67,7 +76,7 @@ case "$cmd" in
       exit 1
     fi
     ;;
-  log)     tail -f "$HOME/Library/Logs/afu-topic-planner.log" "$HOME/Library/Logs/afu-topic-planner.err.log" ;;
+  log)     tail -f "$LOG_OUT" "$LOG_ERR" ;;
   *)
     sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
     exit 1

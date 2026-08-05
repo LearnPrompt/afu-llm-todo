@@ -114,13 +114,48 @@ function extractExcerpt(body) {
   return lines.slice(0, 3).join(' ').slice(0, 180);
 }
 
+const INBOX_SHORT_LINK_PATTERN = /https?:\/\/(?:v\.douyin\.com|xhslink\.com|b23\.tv)\/[A-Za-z0-9\/]+/;
+const INBOX_QUOTA_FAILURE_PATTERN = /积分(余额)?不足/;
+
+function normalizeUrl(url) {
+  const trimmed = String(url || '').trim();
+  if (!trimmed) return trimmed;
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return trimmed;
+  }
+
+  const dropKeys = new Set(['from', 'share_from', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'source', 'scene']);
+  const remainingParams = [];
+  for (const [key, value] of parsed.searchParams.entries()) {
+    if (dropKeys.has(key) || /^utm_/.test(key)) continue;
+    remainingParams.push([key, value]);
+  }
+  remainingParams.sort((a, b) => (a[0] === b[0] ? a[1].localeCompare(b[1]) : a[0].localeCompare(b[0])));
+
+  const pathname = parsed.pathname.replace(/\/+$/, '');
+  const base = `${parsed.origin}${pathname}`.toLowerCase();
+  const query = remainingParams.length
+    ? '?' + remainingParams.map(([key, value]) => `${key}=${value}`).join('&').toLowerCase()
+    : '';
+
+  return `${base}${query}`;
+}
+
 function deriveInboxCandidate({ filePath, raw }) {
   const { frontmatter, body } = parseFrontmatter(raw);
   const title = extractTitleFromInbox(frontmatter, body, filePath);
-  const sourceUrl = normalizeWhitespace(frontmatter.url || frontmatter.source_url || '');
+  let sourceUrl = normalizeWhitespace(frontmatter.url || frontmatter.source_url || '');
+  if (!sourceUrl) {
+    const fallbackMatch = String(body || '').match(INBOX_SHORT_LINK_PATTERN);
+    if (fallbackMatch) sourceUrl = fallbackMatch[0];
+  }
   const excerpt = extractExcerpt(body);
   const reasons = [];
   if (!sourceUrl) reasons.push('缺少原始链接');
+  if (sourceUrl && INBOX_QUOTA_FAILURE_PATTERN.test(body)) reasons.push('内容疑似未完整抓取');
   if (excerpt.length < 32) reasons.push('正文信息太少');
   if (isGenericTitle(frontmatter.title || path.basename(filePath, '.md'))) reasons.push('标题需要人工确认');
   const confidence = reasons.length >= 2 ? 'low' : reasons.length === 1 ? 'medium' : 'high';
@@ -133,7 +168,7 @@ function deriveInboxCandidate({ filePath, raw }) {
     savedAt: normalizeWhitespace(frontmatter.saved || frontmatter.created || ''),
     tags: normalizeArray(frontmatter.tags),
     excerpt,
-    dedupeKey: sourceUrl ? stableHash(sourceUrl).slice(0, 10) : stableHash(`${filePath}:${title}`).slice(0, 10),
+    dedupeKey: sourceUrl ? stableHash(normalizeUrl(sourceUrl)).slice(0, 10) : stableHash(`${filePath}:${title}`).slice(0, 10),
     suggestedStage: '去重中',
     confidence,
     reasons,
@@ -228,4 +263,5 @@ export {
   buildTopicDraftFromInbox,
   deriveInboxCandidate,
   makeTopicFilename,
+  normalizeUrl,
 };

@@ -207,3 +207,66 @@ test('resolvePlannerPaths joins vault root with configured directories', () => {
   assert.equal(resolved.wikiIndexPath, path.join('/Users/demo/My Vault', '30_整理Wiki/index.md'));
   assert.equal(resolved.wikiLogPath, path.join('/Users/demo/My Vault', '30_整理Wiki/log.md'));
 });
+
+test('normalizePlannerSettings trims and round-trips larkCalendarId/larkCalendarName', () => {
+  const normalized = normalizePlannerSettings({
+    calendarProvider: 'lark',
+    larkCalendarId: ' cal_target_123 ',
+    larkCalendarName: ' 目标日历 ',
+  });
+
+  assert.equal(normalized.larkCalendarId, 'cal_target_123');
+  assert.equal(normalized.larkCalendarName, '目标日历');
+
+  const roundTripped = normalizePlannerSettings(normalized);
+  assert.equal(roundTripped.larkCalendarId, 'cal_target_123');
+  assert.equal(roundTripped.larkCalendarName, '目标日历');
+});
+
+test('normalizePlannerSettings defaults larkCalendarId/larkCalendarName to empty strings', () => {
+  const defaults = createDefaultPlannerSettings();
+  assert.equal(defaults.larkCalendarId, '');
+  assert.equal(defaults.larkCalendarName, '');
+
+  const normalized = normalizePlannerSettings({});
+  assert.equal(normalized.larkCalendarId, '');
+  assert.equal(normalized.larkCalendarName, '');
+});
+
+test('createDefaultPlannerSettings defaults external calendar aggregation sources to empty arrays', () => {
+  const defaults = createDefaultPlannerSettings();
+  assert.deepEqual(defaults.externalLarkCalendarIds, []);
+  assert.deepEqual(defaults.externalMacosCalendarNames, []);
+});
+
+test('normalizePlannerSettings trims, dedupes, and round-trips external calendar id/name lists', () => {
+  const normalized = normalizePlannerSettings({
+    externalLarkCalendarIds: [' cal_a ', 'cal_b', 'cal_a', '', '  '],
+    externalMacosCalendarNames: [' 工作 ', '生活', '工作'],
+  });
+
+  assert.deepEqual(normalized.externalLarkCalendarIds, ['cal_a', 'cal_b']);
+  assert.deepEqual(normalized.externalMacosCalendarNames, ['工作', '生活']);
+
+  const roundTripped = normalizePlannerSettings(normalized);
+  assert.deepEqual(roundTripped.externalLarkCalendarIds, ['cal_a', 'cal_b']);
+  assert.deepEqual(roundTripped.externalMacosCalendarNames, ['工作', '生活']);
+});
+
+test('normalizePlannerSettings falls back to an empty array for non-array external calendar fields', () => {
+  const normalized = normalizePlannerSettings({
+    externalLarkCalendarIds: 'cal_a',
+    externalMacosCalendarNames: null,
+  });
+
+  assert.deepEqual(normalized.externalLarkCalendarIds, []);
+  assert.deepEqual(normalized.externalMacosCalendarNames, []);
+});
+
+test('normalizePlannerSettings caps external calendar lists at 10 entries', () => {
+  const ids = Array.from({ length: 15 }, (_, index) => `cal_${index}`);
+  const normalized = normalizePlannerSettings({ externalLarkCalendarIds: ids });
+
+  assert.equal(normalized.externalLarkCalendarIds.length, 10);
+  assert.deepEqual(normalized.externalLarkCalendarIds, ids.slice(0, 10));
+});

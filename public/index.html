@@ -213,6 +213,19 @@
                   </select>
                   <span id="plannerMacosCalendarStatus" class="form-hint">只显示 Calendar.app 里可写入的日历。</span>
                 </label>
+                <label>
+                  飞书目标日历
+                  <select id="plannerLarkCalendarId">
+                    <option value="">主日历(默认)</option>
+                  </select>
+                  <span id="plannerLarkCalendarStatus" class="form-hint">默认同步到主日历。</span>
+                </label>
+                <div class="directory-field" id="externalCalendarSection">
+                  <label>周面板外部日程</label>
+                  <span class="form-hint">勾选要在周面板上只读显示的日历；不勾选则跟随上面的同步目标。</span>
+                  <div class="external-calendar-list" id="externalLarkCalendarList"></div>
+                  <div class="external-calendar-list" id="externalMacosCalendarList"></div>
+                </div>
               </div>
               <div id="vaultLinkBanner" class="settings-diag-banner vault-link-banner" hidden>
                 <span id="vaultLinkMessage"></span>
@@ -240,6 +253,7 @@
         <div class="toolbar-right">
           <button id="prevWeekBtn" type="button">上一周</button>
           <div id="weekLabel" class="week-label"></div>
+          <span id="externalEventsStatus" class="form-hint" hidden></span>
           <button id="nextWeekBtn" type="button">下一周</button>
           <button id="refreshBtn" class="accent-btn" type="button">刷新</button>
         </div>
@@ -250,7 +264,30 @@
           <div class="workspace-tabs" role="tablist" aria-label="阿福素材面板">
             <button class="workspace-tab is-active" type="button" data-workspace-view="inbox">收件箱</button>
             <button class="workspace-tab" type="button" data-workspace-view="backlog">排期池</button>
+            <button class="workspace-tab" type="button" data-workspace-view="today">今天</button>
           </div>
+
+          <section class="sidebar-view" data-view-panel="today">
+            <div class="panel-head panel-head-compact">
+              <div>
+                <p class="panel-tag">阿福今日台账</p>
+                <h2 id="todayViewTitle">今天</h2>
+              </div>
+              <span id="todayHint">开工先看这里:今天要做什么、欠了什么、进了什么。</span>
+            </div>
+            <div class="today-section">
+              <h3 class="today-section-title">今日已排期 <span id="todayScheduledCount" class="today-count"></span></h3>
+              <div id="todayScheduledList" class="topic-list today-list"></div>
+            </div>
+            <div class="today-section">
+              <h3 class="today-section-title">过期未完成 <span id="todayOverdueCount" class="today-count"></span></h3>
+              <div id="todayOverdueList" class="topic-list today-list"></div>
+            </div>
+            <div class="today-section">
+              <h3 class="today-section-title">今天新进收件箱 <span id="todayInboxCount" class="today-count"></span></h3>
+              <div id="todayInboxList" class="inbox-candidate-list today-list"></div>
+            </div>
+          </section>
 
           <section class="sidebar-view inbox-panel is-active" data-view-panel="inbox">
             <div class="panel-head panel-head-compact">
@@ -312,6 +349,13 @@
                   <option value="6">6 条</option>
                 </select>
               </label>
+              <div class="merge-toolbar">
+                <button id="aiSuggestMergeBtn" class="ghost-btn" type="button">AI 建议分组</button>
+                <button id="mergeSelectedBtn" class="accent-btn" type="button">合并所选</button>
+                <button id="batchDeleteBtn" class="ghost-btn danger-ghost-btn" type="button" disabled>批量删除</button>
+                <span id="mergeInfo" class="batch-info">勾选卡片后可合并或批量删除;合并时先勾的做主卡</span>
+              </div>
+              <div id="mergeSuggestions" class="merge-suggestions" hidden></div>
             </div>
             <div id="backlogList" class="topic-list"></div>
           </section>
@@ -503,6 +547,7 @@
         </div>
         <div class="topic-tags"></div>
         <div class="topic-actions">
+          <button class="mini-btn" data-action="complete" type="button">完成</button>
           <button class="mini-btn" data-action="schedule" type="button">排期</button>
           <button class="mini-btn" data-action="unschedule" type="button">取消排期</button>
           <button class="mini-btn" data-action="revert-import" type="button">撤回转卡</button>

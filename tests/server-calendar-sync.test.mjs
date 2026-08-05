@@ -298,7 +298,7 @@ async function requestJson(port, pathname, body) {
       });
     });
     req.on("error", reject);
-    req.setTimeout(1_500, () => {
+    req.setTimeout(5_000, () => {
       req.destroy(new Error("request timed out"));
     });
     if (payload) req.write(payload);

@@ -12,6 +12,8 @@ import {
   buildAppleScriptDate,
   buildBatchCalendarCleanupScript,
   buildDeleteEventsByTopicScript,
+  buildListEventsScript,
+  parseMacOSEventLines,
   planCalendarCleanup,
   toAppleScriptString,
 } from "./macos-calendar.mjs";
@@ -65,6 +67,7 @@ const FRONTMATTER_ORDER = [
   "scheduled_date",
   "scheduled_start",
   "scheduled_end",
+  "completed_date",
   "calendar_provider",
   "calendar_sync_status",
   "lark_calendar_id",
@@ -83,7 +86,9 @@ const FRONTMATTER_ORDER = [
 let authCache = { expiresAt: 0, value: null };
 let calendarCache = { expiresAt: 0, value: null };
 let authFlowCache = { expiresAt: 0, value: null };
+let larkCalendarListCache = { expiresAt: 0, value: null };
 let plannerSettingsCache = null;
+let externalEventsCache = new Map();
 const topicMutationLocks = new Map();
 
 createServer(async (req, res) => {
@@ -96,6 +101,14 @@ createServer(async (req, res) => {
 
     if (url.pathname === "/api/topics/day" && req.method === "GET") {
       return respondJson(res, await buildDayPayload(url.searchParams.get("date")));
+    }
+
+    if (url.pathname === "/api/topics/completed-week" && req.method === "GET") {
+      return respondJson(res, await buildCompletedWeekPayload(url.searchParams.get("start"), url.searchParams.get("end")));
+    }
+
+    if (url.pathname === "/api/calendar/external-events" && req.method === "GET") {
+      return respondJson(res, await buildExternalEventsPayload(url.searchParams.get("start"), url.searchParams.get("end")));
     }
 
     if (url.pathname === "/api/inbox-candidates" && req.method === "GET") {
@@ -171,6 +184,11 @@ createServer(async (req, res) => {
       return respondJson(res, await withTopicMutationLock(body.path, () => disposeTopic(body)));
     }
 
+    if (url.pathname === "/api/topics/complete" && req.method === "POST") {
+      const body = await readJsonBody(req);
+      return respondJson(res, await withTopicMutationLock(body.path, () => completeTopic(body)));
+    }
+
     if (url.pathname === "/api/topics/dispose-batch" && req.method === "POST") {
       const body = await readJsonBody(req);
       return respondJson(res, await disposeTopicsBatch(body));
@@ -205,6 +223,10 @@ createServer(async (req, res) => {
 
     if (url.pathname === "/api/macos/calendars" && req.method === "GET") {
       return respondJson(res, await getMacOSCalendarsPayload());
+    }
+
+    if (url.pathname === "/api/lark/calendars" && req.method === "GET") {
+      return respondJson(res, await getLarkCalendarsPayload());
     }
 
     if (url.pathname === "/api/health" && req.method === "GET") {
@@ -368,12 +390,24 @@ async function mergeTopics(payload) {
     throw badRequest("没有可合并的卡片(不能把卡片合并进自己)");
   }
 
+  const newTitle = optionalString(payload.newTitle);
+  let primaryBody = primarySource.body;
+  let finalTitle = primaryTitle;
+  if (newTitle && newTitle !== primaryTitle) {
+    // 合并后的卡应该呈现合并后的新主题，而不是沿用某一张成员卡的标题
+    primaryBody = /^#\s+.+$/m.test(primaryBody)
+      ? primaryBody.replace(/^#\s+.+$/m, `# ${newTitle}`)
+      : `# ${newTitle}\n\n${primaryBody.replace(/^\n+/, "")}`;
+    finalTitle = newTitle;
+  }
+
   primaryTopic.updated = todayString();
-  await writeTopicFile(primaryAbsPath, primaryTopic, primarySource.body + appendBody);
-  await appendPlannerLog("topic-merge", primaryTitle, {
+  await writeTopicFile(primaryAbsPath, primaryTopic, primaryBody + appendBody);
+  await appendPlannerLog("topic-merge", finalTitle, {
     path: primarySource.relPath,
     mergedCount: merged.length,
     merged: merged.map((item) => item.path),
+    ...(newTitle && { newTitle }),
   });
 
   return {
@@ -698,6 +732,8 @@ function resetRuntimeCaches() {
   authCache = { expiresAt: 0, value: null };
   calendarCache = { expiresAt: 0, value: null };
   authFlowCache = { expiresAt: 0, value: null };
+  larkCalendarListCache = { expiresAt: 0, value: null };
+  externalEventsCache = new Map();
 }
 
 async function listTopics() {
@@ -1443,9 +1479,9 @@ async function disposeTopic(payload, options = {}) {
   await fs.unlink(filePath);
 
   let inboxSourceDeleted = false;
-  if (topic.sourceInboxPath) {
+  if (topic.source_inbox_path) {
     try {
-      const inboxSourceAbs = await resolveInboxPath(topic.sourceInboxPath);
+      const inboxSourceAbs = await resolveInboxPath(topic.source_inbox_path);
       await fs.unlink(inboxSourceAbs);
       inboxSourceDeleted = true;
     } catch (e) {
@@ -1458,13 +1494,388 @@ async function disposeTopic(payload, options = {}) {
     action,
     reason,
     archivePath: path.relative((await getPlannerPaths()).vaultRoot, archivePath),
-    ...(topic.sourceInboxPath && { inboxSourcePath: topic.sourceInboxPath, inboxSourceDeleted }),
+    ...(topic.source_inbox_path && { inboxSourcePath: topic.source_inbox_path, inboxSourceDeleted }),
   });
 
   return {
     ok: true,
     archived: true,
     archivePath: path.relative((await getPlannerPaths()).vaultRoot, archivePath),
+  };
+}
+
+// 正向完成通道:和 disposeTopic 的归档分支很像,但事情真实发生过——
+// 不清日历事件、不清 calendar 相关字段,只把 stage 打成"已发布"再归档留底。
+async function completeTopic(payload) {
+  const filePath = await resolveTopicPath(payload.path);
+  const source = await loadTopicSource(filePath);
+  const title = extractTitle(source.body, path.basename(filePath, ".md"));
+  const topic = normalizeTopic(source.frontmatter, title, source.relPath);
+
+  if (["已发布", "已归档", "已拒绝"].includes(topic.stage)) {
+    throw badRequest("这张卡已经结束,不能重复标记完成");
+  }
+
+  topic.stage = "已发布";
+  topic.updated = todayString();
+  // completed-week 按日期串比对,必须用本地时区的今天(todayString 0-8 点会差一天)
+  topic.completed_date = localDateString();
+
+  const updatedContent = composeMarkdown(topic, source.body);
+  const archivePath = await buildArchivePath(filePath);
+  await fs.mkdir(path.dirname(archivePath), { recursive: true });
+  await fs.writeFile(archivePath, updatedContent, "utf8");
+  await fs.unlink(filePath);
+
+  let inboxSourceDeleted = false;
+  if (topic.source_inbox_path) {
+    try {
+      const inboxSourceAbs = await resolveInboxPath(topic.source_inbox_path);
+      await fs.unlink(inboxSourceAbs);
+      inboxSourceDeleted = true;
+    } catch (e) {
+      if (e.code !== "ENOENT") throw e;
+    }
+  }
+
+  const relativeArchivePath = path.relative((await getPlannerPaths()).vaultRoot, archivePath);
+  await appendPlannerLog("topic-complete", title, {
+    path: source.relPath,
+    archivePath: relativeArchivePath,
+    ...(topic.source_inbox_path && { inboxSourcePath: topic.source_inbox_path, inboxSourceDeleted }),
+  });
+
+  return {
+    ok: true,
+    completed: true,
+    archivePath: relativeArchivePath,
+  };
+}
+
+// 本周已完成查询:扫归档目录里 stage === 已发布 的卡,给周面板的折叠区用。
+// scheduled_date 缺失时用 completed_date 兜底判断区间,单卡解析失败跳过不中断。
+async function buildCompletedWeekPayload(startParam, endParam) {
+  const start = normalizeDateString(startParam);
+  const end = normalizeDateString(endParam);
+  if (!start || !end) {
+    throw badRequest("start/end 参数格式必须是 YYYY-MM-DD");
+  }
+
+  const { archiveRoot, vaultRoot } = await getPlannerPaths();
+  const years = new Set([start.slice(0, 4), end.slice(0, 4)]);
+  const topics = [];
+
+  for (const year of years) {
+    const yearDir = path.join(archiveRoot, year);
+    let entries = [];
+    try {
+      entries = await fs.readdir(yearDir, { withFileTypes: true });
+    } catch (error) {
+      if (error.code === "ENOENT") continue;
+      throw error;
+    }
+
+    const files = entries.filter((entry) => entry.isFile() && entry.name.endsWith(".md"));
+    for (const entry of files) {
+      const filePath = path.join(yearDir, entry.name);
+      try {
+        const raw = await fs.readFile(filePath, "utf8");
+        const { frontmatter, body } = parseFrontmatter(raw);
+        const title = normalizeDisplayTitle(extractTitle(body, path.basename(filePath, ".md")));
+        const normalized = normalizeTopic(frontmatter, title, path.relative(vaultRoot, filePath));
+
+        if (normalized.stage !== "已发布") continue;
+        const compareDate = normalized.scheduled_date || normalized.completed_date;
+        if (!compareDate || compareDate < start || compareDate > end) continue;
+
+        topics.push({
+          title,
+          scheduledDate: normalized.scheduled_date || "",
+          scheduledStart: normalized.scheduled_start || "",
+          scheduledEnd: normalized.scheduled_end || "",
+          completedDate: normalized.completed_date || "",
+          archivePath: path.relative(vaultRoot, filePath),
+        });
+      } catch {
+        // 单个归档文件解析失败不影响整体查询
+        continue;
+      }
+    }
+  }
+
+  return { ok: true, topics };
+}
+
+const EXTERNAL_EVENTS_CACHE_TTL_MS = 90_000;
+const EXTERNAL_EVENTS_CACHE_MAX_KEYS = 20;
+const EXTERNAL_EVENTS_MAX_TOTAL = 500;
+const EXTERNAL_EVENTS_MAX_RANGE_DAYS = 31;
+
+// 纯日历天数差(不含时区换算),用于校验 start/end 区间长度。
+function daysBetweenDateStrings(start, end) {
+  const [sy, sm, sd] = start.split("-").map(Number);
+  const [ey, em, ed] = end.split("-").map(Number);
+  const startUTC = Date.UTC(sy, sm - 1, sd);
+  const endUTC = Date.UTC(ey, em - 1, ed);
+  return Math.round((endUTC - startUTC) / 86_400_000);
+}
+
+// startDate..endDate(含两端)逐日展开成 "YYYY-MM-DD" 列表,纯日历算术。
+function iterateDateRange(startDate, endDate) {
+  const [sy, sm, sd] = startDate.split("-").map(Number);
+  const [ey, em, ed] = endDate.split("-").map(Number);
+  const startUTC = Date.UTC(sy, sm - 1, sd);
+  const endUTC = Date.UTC(ey, em - 1, ed);
+  const dates = [];
+  for (let t = startUTC; t <= endUTC; t += 86_400_000) {
+    const cursor = new Date(t);
+    const y = cursor.getUTCFullYear();
+    const m = String(cursor.getUTCMonth() + 1).padStart(2, "0");
+    const d = String(cursor.getUTCDate()).padStart(2, "0");
+    dates.push(`${y}-${m}-${d}`);
+  }
+  return dates;
+}
+
+// 飞书 +agenda 的 start_time/end_time 归一化成 { date, time, allDay }。
+// datetime 自带偏移,new Date() 后按 TIMEZONE 重新格式化即可得到本地日期/时间。
+function larkTimePartsToLocal(timeObj) {
+  if (!timeObj || typeof timeObj !== "object") return null;
+  if (optionalString(timeObj.date)) {
+    return { date: optionalString(timeObj.date), time: "", allDay: true };
+  }
+  if (optionalString(timeObj.datetime)) {
+    const parsed = new Date(timeObj.datetime);
+    if (Number.isNaN(parsed.getTime())) return null;
+    const date = new Intl.DateTimeFormat("sv-SE", { timeZone: TIMEZONE }).format(parsed);
+    const time = new Intl.DateTimeFormat("sv-SE", {
+      timeZone: TIMEZONE,
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(parsed);
+    return { date, time, allDay: false };
+  }
+  return null;
+}
+
+function normalizeLarkExternalEvent(item, calendarLabel) {
+  const startParts = larkTimePartsToLocal(item?.start_time);
+  if (!startParts) return null;
+  const endParts = larkTimePartsToLocal(item?.end_time);
+  return {
+    source: "lark",
+    calendarLabel,
+    eventId: optionalString(item?.event_id),
+    title: optionalString(item?.summary) || "(无标题)",
+    allDay: Boolean(startParts.allDay),
+    startDate: startParts.date,
+    startTime: startParts.time,
+    endDate: (endParts && endParts.date) || startParts.date,
+    endTime: (endParts && endParts.time) || startParts.time,
+    freeBusy: optionalString(item?.free_busy_status),
+    hasTopicMarker: false,
+  };
+}
+
+async function fetchLarkExternalEvents(calendarIds, start, end) {
+  // calendarLabel 尽量给日历名而不是原始 id;列表拉不到时降级用 id。
+  let labelById = new Map();
+  try {
+    labelById = new Map((await listLarkCalendars()).map((calendar) => [calendar.id, calendar.summary]));
+  } catch {
+    // 忽略,label 降级为 calendarId
+  }
+  const events = [];
+  for (const calendarId of calendarIds) {
+    const result = await execJson("lark-cli", [
+      "calendar",
+      "+agenda",
+      "--start",
+      start,
+      "--end",
+      end,
+      "--calendar-id",
+      calendarId,
+    ]);
+    const list = Array.isArray(result?.data) ? result.data : [];
+    for (const item of list) {
+      const normalized = normalizeLarkExternalEvent(item, labelById.get(calendarId) || calendarId);
+      if (normalized) events.push(normalized);
+    }
+  }
+  return events;
+}
+
+async function fetchMacOSExternalEvents(calendarNames, start, end) {
+  if (!calendarNames.length) return [];
+  const script = buildListEventsScript({ calendarNames, startDate: start, endDate: end });
+  const output = await execText("osascript", ["-e", script], { timeoutMs: 30_000 });
+  return parseMacOSEventLines(output).map((event) => ({
+    source: "macos",
+    calendarLabel: event.calendarName,
+    eventId: event.uid,
+    title: event.title || "(无标题)",
+    allDay: event.allDay,
+    startDate: event.startDate,
+    startTime: event.startTime,
+    endDate: event.endDate || event.startDate,
+    endTime: event.endTime,
+    freeBusy: "",
+    hasTopicMarker: event.hasTopicMarker,
+  }));
+}
+
+// 跨天事件展开成逐日条目:首日保留真实开始时间、末日保留真实结束时间,
+// 中间日按整天处理。单日事件原样返回一条。
+function expandExternalEvent(event) {
+  const startDate = event.startDate;
+  const endDate = event.endDate || event.startDate;
+  const base = (date) => ({
+    source: event.source,
+    calendarLabel: event.calendarLabel,
+    eventId: event.eventId,
+    title: event.title,
+    date,
+    freeBusy: event.freeBusy || "",
+    hasTopicMarker: Boolean(event.hasTopicMarker),
+  });
+
+  if (!startDate) return [];
+  if (!endDate || endDate <= startDate) {
+    return [{
+      ...base(startDate),
+      start: event.startTime || "",
+      end: event.endTime || "",
+      allDay: Boolean(event.allDay),
+    }];
+  }
+
+  const dates = iterateDateRange(startDate, endDate);
+  return dates.map((date, index) => {
+    const isFirst = index === 0;
+    const isLast = index === dates.length - 1;
+    if (!isFirst && !isLast) {
+      return { ...base(date), start: "", end: "", allDay: true };
+    }
+    return {
+      ...base(date),
+      start: isFirst ? (event.startTime || "") : "",
+      end: isLast ? (event.endTime || "") : "",
+      allDay: Boolean(event.allDay),
+    };
+  });
+}
+
+// 两源并发拉取,单源失败只警告不挡另一源。返回未去重的展开事件(封顶 500)+ warnings,
+// 这一整包会被 externalEventsCache 缓存,去重留到每次响应时再做(见 buildExternalEventsPayload)。
+async function fetchAndNormalizeExternalEvents({ start, end, larkCalendarIds, macosCalendarNames }) {
+  const warnings = [];
+  const [larkResult, macosResult] = await Promise.allSettled([
+    larkCalendarIds.length ? fetchLarkExternalEvents(larkCalendarIds, start, end) : Promise.resolve([]),
+    macosCalendarNames.length ? fetchMacOSExternalEvents(macosCalendarNames, start, end) : Promise.resolve([]),
+  ]);
+
+  let larkEvents = [];
+  if (larkResult.status === "fulfilled") {
+    larkEvents = larkResult.value;
+  } else {
+    warnings.push({ source: "lark", message: formatCalendarSyncError(larkResult.reason) });
+  }
+
+  let macosEvents = [];
+  if (macosResult.status === "fulfilled") {
+    macosEvents = macosResult.value;
+  } else {
+    warnings.push({ source: "macos", message: formatCalendarSyncError(macosResult.reason) });
+  }
+
+  const expanded = [...larkEvents, ...macosEvents].flatMap(expandExternalEvent);
+  return { events: expanded.slice(0, EXTERNAL_EVENTS_MAX_TOTAL), warnings };
+}
+
+// 去重(每次响应时做,不缓存去重结果):阿福自己建的事件(卡片 frontmatter 记过 id)
+// 不重复展示;macOS 事件 description 里带 topic_id 标记的也过滤,兜底 uid 丢失的情况。
+function dedupeExternalEvents(entries, topics) {
+  const larkIds = new Set(topics.map((topic) => topic.larkEventId).filter(Boolean));
+  const macosIds = new Set(topics.map((topic) => topic.macosEventId).filter(Boolean));
+  return entries.filter((entry) => {
+    if (entry.source === "lark") {
+      return !(entry.eventId && larkIds.has(entry.eventId));
+    }
+    if (entry.source === "macos") {
+      if (entry.hasTopicMarker) return false;
+      return !(entry.eventId && macosIds.has(entry.eventId));
+    }
+    return true;
+  });
+}
+
+// 外部日历只读聚合:周面板展示飞书 + macOS 日历里已有的事件,不写入、不同步。
+// 来源为空(未配置聚合源且未选主排期日历)时直接短路,不碰任何 CLI。
+async function buildExternalEventsPayload(startParam, endParam) {
+  const start = normalizeDateString(startParam);
+  const end = normalizeDateString(endParam);
+  if (!start || !end) {
+    throw badRequest("start/end 参数格式必须是 YYYY-MM-DD");
+  }
+  if (start > end) {
+    throw badRequest("start 不能晚于 end");
+  }
+  if (daysBetweenDateStrings(start, end) > EXTERNAL_EVENTS_MAX_RANGE_DAYS) {
+    throw badRequest(`查询区间不能超过 ${EXTERNAL_EVENTS_MAX_RANGE_DAYS} 天`);
+  }
+
+  const settings = await getPlannerSettings();
+  const resolutionWarnings = [];
+
+  let larkCalendarIds = normalizeArray(settings.externalLarkCalendarIds);
+  if (!larkCalendarIds.length && settings.calendarProvider === "lark") {
+    try {
+      const targetId = await getTargetLarkCalendarId();
+      if (targetId) larkCalendarIds = [targetId];
+    } catch (error) {
+      resolutionWarnings.push({ source: "lark", message: formatCalendarSyncError(error) });
+    }
+  }
+
+  let macosCalendarNames = normalizeArray(settings.externalMacosCalendarNames);
+  if (!macosCalendarNames.length && settings.calendarProvider === "macos" && optionalString(settings.macosCalendarName)) {
+    macosCalendarNames = [settings.macosCalendarName];
+  }
+
+  if (!larkCalendarIds.length && !macosCalendarNames.length) {
+    return { ok: true, events: [], warnings: resolutionWarnings, sources: { lark: [], macos: [] } };
+  }
+
+  const cacheKey = [
+    start,
+    end,
+    [...larkCalendarIds].sort().join(","),
+    [...macosCalendarNames].sort().join(","),
+  ].join("|");
+
+  let cacheEntry = externalEventsCache.get(cacheKey);
+  if (!cacheEntry || Date.now() >= cacheEntry.expiresAt) {
+    const fetched = await fetchAndNormalizeExternalEvents({ start, end, larkCalendarIds, macosCalendarNames });
+    if (externalEventsCache.size >= EXTERNAL_EVENTS_CACHE_MAX_KEYS) {
+      externalEventsCache.clear();
+    }
+    cacheEntry = { value: fetched, expiresAt: Date.now() + EXTERNAL_EVENTS_CACHE_TTL_MS };
+    externalEventsCache.set(cacheKey, cacheEntry);
+  }
+
+  const topics = await listTopics();
+  const events = dedupeExternalEvents(cacheEntry.value.events, topics).sort((a, b) => {
+    if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+    return String(a.start || "").localeCompare(String(b.start || ""));
+  });
+
+  return {
+    ok: true,
+    events,
+    warnings: [...resolutionWarnings, ...cacheEntry.value.warnings],
+    sources: { lark: larkCalendarIds, macos: macosCalendarNames },
   };
 }
 
@@ -1873,6 +2284,11 @@ async function getPrimaryCalendarId() {
   return calendarId;
 }
 
+async function getTargetLarkCalendarId() {
+  const settings = await getPlannerSettings();
+  return settings.larkCalendarId || (await getPrimaryCalendarId());
+}
+
 async function syncTopicToCalendar({ title, topic, path: topicPath, provider }) {
   if (provider === "lark") {
     return syncTopicToLark({ title, topic, path: topicPath });
@@ -1901,7 +2317,7 @@ async function syncTopicToLark({ title, topic, path: topicPath }) {
     };
   }
 
-  const calendarId = topic.lark_calendar_id || (await getPrimaryCalendarId());
+  const calendarId = await getTargetLarkCalendarId();
   const startTs = toEpochSeconds(topic.scheduled_date, topic.scheduled_start);
   const endTs = toEpochSeconds(topic.scheduled_date, topic.scheduled_end);
   const data = {
@@ -1917,13 +2333,40 @@ async function syncTopicToLark({ title, topic, path: topicPath }) {
     free_busy_status: "busy",
   };
 
-  if (topic.lark_event_id) {
+  // 目标日历和卡片上次写入的日历不一致时先做迁移:老事件删不掉也不阻塞,
+  // 只记一条警告日志,照样在目标日历新建事件,保证排期本身不失败。
+  let existingEventId = topic.lark_event_id || "";
+  if (existingEventId && topic.lark_calendar_id && topic.lark_calendar_id !== calendarId) {
+    try {
+      await execJson("lark-cli", [
+        "calendar",
+        "events",
+        "delete",
+        "--params",
+        JSON.stringify({
+          calendar_id: topic.lark_calendar_id,
+          event_id: existingEventId,
+          need_notification: "false",
+        }),
+      ]);
+    } catch (error) {
+      await appendPlannerLog("lark-migrate-delete-failed", title, {
+        oldCalendarId: topic.lark_calendar_id,
+        newCalendarId: calendarId,
+        eventId: existingEventId,
+        error: error.message,
+      });
+    }
+    existingEventId = "";
+  }
+
+  if (existingEventId) {
     await execJson("lark-cli", [
       "calendar",
       "events",
       "patch",
       "--params",
-      JSON.stringify({ calendar_id: calendarId, event_id: topic.lark_event_id }),
+      JSON.stringify({ calendar_id: calendarId, event_id: existingEventId }),
       "--data",
       JSON.stringify(data),
     ]);
@@ -1931,7 +2374,7 @@ async function syncTopicToLark({ title, topic, path: topicPath }) {
     return {
       provider: "lark",
       syncStatus: "已同步",
-      eventId: topic.lark_event_id,
+      eventId: existingEventId,
       calendarId,
     };
   }
@@ -1990,7 +2433,7 @@ async function syncTopicToMacOSCalendar({ title, topic, path: topicPath }) {
 
 async function deleteLarkEvent(topic) {
   if (!topic.lark_event_id) return;
-  const calendarId = topic.lark_calendar_id || (await getPrimaryCalendarId());
+  const calendarId = topic.lark_calendar_id || (await getTargetLarkCalendarId());
   await execJson("lark-cli", [
     "calendar",
     "events",
@@ -2142,6 +2585,40 @@ async function getMacOSCalendarsPayload() {
   };
 }
 
+async function getLarkCalendarsPayload() {
+  const calendars = await listLarkCalendars();
+  return {
+    ok: true,
+    calendars,
+    writableCalendars: calendars.filter((calendar) => calendar.writable),
+  };
+}
+
+async function listLarkCalendars() {
+  if (Date.now() < larkCalendarListCache.expiresAt && larkCalendarListCache.value) {
+    return larkCalendarListCache.value;
+  }
+
+  const result = await execJson("lark-cli", ["calendar", "calendars", "list"]);
+  const list = result?.data?.calendar_list || result?.calendar_list || [];
+  const calendars = list
+    .map((calendar) => ({
+      id: optionalString(calendar.calendar_id),
+      summary: optionalString(calendar.summary_alias) || optionalString(calendar.summary),
+      type: optionalString(calendar.type),
+      role: optionalString(calendar.role),
+      // google 等第三方日历 role 可能是 owner 但实际只读,不能当同步目标
+      writable:
+        ["writer", "owner"].includes(optionalString(calendar.role)) &&
+        !calendar.is_third_party &&
+        optionalString(calendar.type) !== "google",
+    }))
+    .filter((calendar) => calendar.id);
+
+  larkCalendarListCache = { value: calendars, expiresAt: Date.now() + 60_000 };
+  return calendars;
+}
+
 async function listMacOSCalendars() {
   const script = `
 tell application id "com.apple.iCal"
@@ -2241,6 +2718,13 @@ async function probeLarkAvailability(currentStatus) {
     next.message = "飞书授权可用，可以同步主日历。";
     next.calendarId = calendar.id;
     next.calendarName = calendar.summary;
+
+    const settings = await getPlannerSettings();
+    if (settings.larkCalendarId) {
+      next.calendarId = settings.larkCalendarId;
+      next.calendarName = settings.larkCalendarName || calendar.summary;
+    }
+
     return next;
   } catch (error) {
     const networkUnavailable = isNetworkError(error);
@@ -2425,6 +2909,9 @@ function execText(command, args, options = {}) {
 }
 
 async function resolveCommand(command) {
+  if (command === "osascript" && process.env.OSASCRIPT_PATH) {
+    return process.env.OSASCRIPT_PATH;
+  }
   if (command !== "lark-cli") return command;
   for (const candidate of LARK_CLI_CANDIDATES) {
     try {

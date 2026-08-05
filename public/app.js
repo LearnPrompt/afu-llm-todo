@@ -21,6 +21,10 @@ const state = {
   macosCalendarsLoaded: false,
   macosCalendarsLoading: false,
   macosCalendarsError: "",
+  larkCalendars: [],
+  larkCalendarsLoaded: false,
+  larkCalendarsLoading: false,
+  larkCalendarsError: "",
   larkAuthFlow: null,
   weekOffset: 0,
   search: "",
@@ -46,8 +50,16 @@ const state = {
   vaultDirectoryEditing: false,
   mergeSelection: new Set(),
   mergeSuggestions: [],
+  mergeGroupSelection: new Set(),
   mergeSuggesting: false,
   mergeSubmitting: false,
+  completedWeek: [],
+  externalEvents: [],
+  externalEventsLoading: false,
+  externalEventsWarnings: [],
+  externalEventsToken: 0,
+  larkCalendarsAll: [],
+  macosCalendarsAll: [],
 };
 
 const elements = {
@@ -81,6 +93,9 @@ const elements = {
   searchInput: document.querySelector("#searchInput"),
   stageFilter: document.querySelector("#stageFilter"),
   weekLabel: document.querySelector("#weekLabel"),
+  externalEventsStatus: document.querySelector("#externalEventsStatus"),
+  externalLarkCalendarList: document.querySelector("#externalLarkCalendarList"),
+  externalMacosCalendarList: document.querySelector("#externalMacosCalendarList"),
   larkStatus: document.querySelector("#larkStatus"),
   plannerSettingsForm: document.querySelector("#plannerSettingsForm"),
   plannerVaultRoot: document.querySelector("#plannerVaultRoot"),
@@ -98,6 +113,8 @@ const elements = {
   copyLarkAuthBtn: document.querySelector("#copyLarkAuthBtn"),
   plannerMacosCalendarName: document.querySelector("#plannerMacosCalendarName"),
   plannerMacosCalendarStatus: document.querySelector("#plannerMacosCalendarStatus"),
+  plannerLarkCalendarId: document.querySelector("#plannerLarkCalendarId"),
+  plannerLarkCalendarStatus: document.querySelector("#plannerLarkCalendarStatus"),
   plannerSettingsHint: document.querySelector("#plannerSettingsHint"),
   settingsDiagBanner: document.querySelector("#settingsDiagBanner"),
   vaultRootLabel: document.querySelector("#vaultRootLabel"),
@@ -186,9 +203,10 @@ async function boot() {
     setWorkspaceView(requestedView);
   }
   await loadTopics();
-  if (state.settings?.calendarProvider === "macos") {
-    await loadMacOSCalendars();
-  }
+  loadExternalEvents();
+  // 外部日程选择器需要全量日历列表（含只读），与同步目标无关，无条件加载。
+  loadMacOSCalendars();
+  loadLarkCalendars();
 }
 
 function initTheme() {
@@ -273,7 +291,10 @@ function bindEvents() {
   elements.dailyInboxConfirmCancelBtn?.addEventListener("click", () => cancelDailyInboxConfirm());
   elements.dailyInboxConfirmOkBtn?.addEventListener("click", () => confirmDailyInboxImport());
 
-  elements.refreshBtn.addEventListener("click", () => loadTopics());
+  elements.refreshBtn.addEventListener("click", () => {
+    loadTopics();
+    loadExternalEvents();
+  });
   elements.themeToggleBtn?.addEventListener("click", () => toggleTheme());
   elements.heroConfigBtn?.addEventListener("click", () => {
     if (elements.plannerSettingsDetails) {
@@ -333,7 +354,11 @@ function bindEvents() {
     if (elements.plannerCalendarProvider.value === "macos") {
       loadMacOSCalendars();
     }
+    if (elements.plannerCalendarProvider.value === "lark") {
+      loadLarkCalendars();
+    }
     renderLarkSetupPanel();
+    renderLarkCalendarSelect();
     elements.plannerSettingsHint.textContent = getSettingsHint({
       ...(state.settings || {}),
       calendarProvider: elements.plannerCalendarProvider.value,
@@ -389,6 +414,7 @@ async function loadTopics() {
     state.hasSavedConfig = Boolean(payload.hasSavedConfig);
     state.configPath = payload.configPath || "";
     state.lark = payload.lark || null;
+    await loadCompletedWeek();
     if (isSampleWorkspace() && state.inboxPageSize > 5) {
       state.inboxPageSize = 5;
       elements.inboxPageSize.value = "5";
@@ -400,6 +426,52 @@ async function loadTopics() {
     alert(error.message);
   } finally {
     setBusy(false);
+  }
+}
+
+async function loadCompletedWeek() {
+  try {
+    const days = getCurrentWeekDays();
+    const start = days[0].iso;
+    const end = days[days.length - 1].iso;
+    const response = await fetch(`/api/topics/completed-week?start=${start}&end=${end}`);
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "加载已完成列表失败");
+    }
+    state.completedWeek = payload.topics || [];
+  } catch (error) {
+    console.error(error);
+    state.completedWeek = [];
+  }
+}
+
+async function loadExternalEvents() {
+  const token = ++state.externalEventsToken;
+  state.externalEventsLoading = true;
+  renderCalendar();
+  try {
+    const days = getCurrentWeekDays();
+    const start = days[0].iso;
+    const end = days[days.length - 1].iso;
+    const response = await fetch(`/api/calendar/external-events?start=${start}&end=${end}`);
+    const payload = await response.json();
+    if (token !== state.externalEventsToken) return;
+    if (!response.ok) {
+      throw new Error(payload.error || "加载外部日程失败");
+    }
+    state.externalEvents = payload.events || [];
+    state.externalEventsWarnings = payload.warnings || [];
+  } catch (error) {
+    if (token !== state.externalEventsToken) return;
+    console.error(error);
+    state.externalEvents = [];
+    state.externalEventsWarnings = [{ source: "all", message: error.message || "加载外部日程失败" }];
+  } finally {
+    if (token === state.externalEventsToken) {
+      state.externalEventsLoading = false;
+      renderCalendar();
+    }
   }
 }
 
@@ -417,12 +489,43 @@ async function loadMacOSCalendars() {
     state.macosCalendars = (payload.writableCalendars || payload.calendars || [])
       .filter((calendar) => calendar?.writable !== false && calendar?.name)
       .map((calendar) => ({ name: calendar.name }));
+    state.macosCalendarsAll = (payload.calendars || payload.writableCalendars || [])
+      .filter((calendar) => calendar?.name)
+      .map((calendar) => ({ name: calendar.name }));
     state.macosCalendarsLoaded = true;
   } catch (error) {
     state.macosCalendarsError = error.message || "读取 macOS 日历失败";
   } finally {
     state.macosCalendarsLoading = false;
     renderMacOSCalendarSelect();
+    renderExternalCalendarPickers();
+  }
+}
+
+async function loadLarkCalendars() {
+  if (state.larkCalendarsLoading) return;
+  state.larkCalendarsLoading = true;
+  state.larkCalendarsError = "";
+  renderLarkCalendarSelect();
+  try {
+    const response = await fetch("/api/lark/calendars");
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error || "读取飞书日历失败");
+    }
+    state.larkCalendars = (payload.writableCalendars || payload.calendars || [])
+      .filter((calendar) => calendar?.writable !== false && calendar?.id)
+      .map((calendar) => ({ id: calendar.id, summary: calendar.summary || calendar.id }));
+    state.larkCalendarsAll = (payload.calendars || payload.writableCalendars || [])
+      .filter((calendar) => calendar?.id)
+      .map((calendar) => ({ id: calendar.id, summary: calendar.summary || calendar.id }));
+    state.larkCalendarsLoaded = true;
+  } catch (error) {
+    state.larkCalendarsError = error.message || "读取飞书日历失败";
+  } finally {
+    state.larkCalendarsLoading = false;
+    renderLarkCalendarSelect();
+    renderExternalCalendarPickers();
   }
 }
 
@@ -603,10 +706,64 @@ function renderPlannerSettings() {
   applyWorkspaceMode(mode);
   elements.plannerCalendarProvider.value = state.settings.calendarProvider || 'none';
   renderMacOSCalendarSelect();
+  renderLarkCalendarSelect();
   elements.plannerSettingsHint.textContent = getSettingsHint(state.settings);
   renderLarkSetupPanel();
   renderVaultLinkBanner();
+  renderExternalCalendarPickers();
 }
+
+function renderExternalCalendarPickers() {
+  const larkList = elements.externalLarkCalendarList;
+  const macosList = elements.externalMacosCalendarList;
+  const selectedLarkIds = new Set(state.settings?.externalLarkCalendarIds || []);
+  const selectedMacosNames = new Set(state.settings?.externalMacosCalendarNames || []);
+
+  if (larkList) {
+    larkList.innerHTML = "";
+    if (!state.larkCalendarsAll.length) {
+      const empty = document.createElement("span");
+      empty.className = "form-hint";
+      empty.textContent = "先连接飞书日历";
+      larkList.append(empty);
+    } else {
+      for (const calendar of state.larkCalendarsAll) {
+        const label = document.createElement("label");
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.value = calendar.id;
+        checkbox.checked = selectedLarkIds.has(calendar.id);
+        const text = document.createElement("span");
+        text.textContent = calendar.summary || calendar.id;
+        label.append(checkbox, text);
+        larkList.append(label);
+      }
+    }
+  }
+
+  if (macosList) {
+    macosList.innerHTML = "";
+    if (!state.macosCalendarsAll.length) {
+      const empty = document.createElement("span");
+      empty.className = "form-hint";
+      empty.textContent = "先连接 macOS 日历";
+      macosList.append(empty);
+    } else {
+      for (const calendar of state.macosCalendarsAll) {
+        const label = document.createElement("label");
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.value = calendar.name;
+        checkbox.checked = selectedMacosNames.has(calendar.name);
+        const text = document.createElement("span");
+        text.textContent = calendar.name;
+        label.append(checkbox, text);
+        macosList.append(label);
+      }
+    }
+  }
+}
+
 
 function renderMacOSCalendarSelect() {
   const select = elements.plannerMacosCalendarName;
@@ -671,6 +828,66 @@ function renderMacOSCalendarSelect() {
   select.value = selectedName || state.macosCalendars[0].name;
   if (elements.plannerMacosCalendarStatus) {
     elements.plannerMacosCalendarStatus.textContent = `已读取 ${state.macosCalendars.length} 个可写日历。`;
+  }
+}
+
+function renderLarkCalendarSelect() {
+  const select = elements.plannerLarkCalendarId;
+  if (!select) return;
+
+  const selectedId = state.settings?.larkCalendarId || select.value || "";
+  select.innerHTML = "";
+  select.append(new Option("主日历(默认)", ""));
+
+  const provider = elements.plannerCalendarProvider?.value || state.settings?.calendarProvider || "none";
+  if (provider !== "lark") {
+    select.disabled = true;
+    select.value = "";
+    if (elements.plannerLarkCalendarStatus) {
+      elements.plannerLarkCalendarStatus.textContent = "默认同步到主日历。";
+    }
+    return;
+  }
+
+  select.disabled = state.larkCalendarsLoading;
+  if (state.larkCalendarsLoading) {
+    select.value = selectedId;
+    if (elements.plannerLarkCalendarStatus) {
+      elements.plannerLarkCalendarStatus.textContent = "正在读取飞书可写日历列表。";
+    }
+    return;
+  }
+
+  if (state.larkCalendarsError) {
+    if (selectedId) {
+      select.append(new Option(state.settings?.larkCalendarName || selectedId, selectedId));
+    }
+    select.value = selectedId;
+    if (elements.plannerLarkCalendarStatus) {
+      elements.plannerLarkCalendarStatus.textContent = `读取失败：${state.larkCalendarsError}`;
+    }
+    return;
+  }
+
+  if (!state.larkCalendarsLoaded) {
+    select.value = selectedId;
+    if (elements.plannerLarkCalendarStatus) {
+      elements.plannerLarkCalendarStatus.textContent = "默认同步到主日历。";
+    }
+    return;
+  }
+
+  for (const calendar of state.larkCalendars) {
+    select.append(new Option(calendar.summary || calendar.id, calendar.id));
+  }
+  if (selectedId && !state.larkCalendars.some((calendar) => calendar.id === selectedId)) {
+    select.append(new Option(state.settings?.larkCalendarName || selectedId, selectedId));
+  }
+  select.value = selectedId;
+  if (elements.plannerLarkCalendarStatus) {
+    elements.plannerLarkCalendarStatus.textContent = state.larkCalendars.length
+      ? `已读取 ${state.larkCalendars.length} 个可写日历。`
+      : "没有找到可写日历，仍会同步到主日历。";
   }
 }
 
@@ -773,9 +990,31 @@ function renderMergeToolbar() {
   closeBtn.addEventListener("click", () => {
     state.mergeSuggestions = [];
     state.mergeSelection = new Set();
+    state.mergeGroupSelection = new Set();
     renderBacklog();
   });
-  head.append(headText, closeBtn);
+  head.append(headText);
+  if (state.mergeGroupSelection.size >= 2) {
+    const mergeGroupsBtn = document.createElement("button");
+    mergeGroupsBtn.type = "button";
+    mergeGroupsBtn.className = "mini-btn accent-btn";
+    mergeGroupsBtn.textContent = `把选中的 ${state.mergeGroupSelection.size} 组合并成一张`;
+    mergeGroupsBtn.addEventListener("click", () => {
+      const picked = [...state.mergeGroupSelection].sort((a, b) => a - b)
+        .map((i) => state.mergeSuggestions[i]).filter(Boolean);
+      const union = [...new Set(picked.flatMap((g) => (g.topics || []).map((t) => t.path)))];
+      if (union.length < 2) return;
+      const draft = window.prompt(
+        `把 ${picked.length} 组共 ${union.length} 张卡合并成一张。合并后的标题(可修改):`,
+        picked[0]?.suggestedTitle || "",
+      );
+      if (draft === null) return;
+      state.mergeSelection = new Set(union);
+      handleMergeSelected({ newTitle: draft.trim() || undefined });
+    });
+    head.append(mergeGroupsBtn);
+  }
+  head.append(closeBtn);
   box.append(head);
 
   state.mergeSuggestions.forEach((group, index) => {
@@ -784,12 +1023,22 @@ function renderMergeToolbar() {
 
     const header = document.createElement("div");
     header.className = "merge-suggestion-header";
+    const groupCheck = document.createElement("input");
+    groupCheck.type = "checkbox";
+    groupCheck.className = "merge-group-check";
+    groupCheck.title = "选中后可与其它组合并成一张卡";
+    groupCheck.checked = state.mergeGroupSelection.has(index);
+    groupCheck.addEventListener("change", () => {
+      if (groupCheck.checked) state.mergeGroupSelection.add(index);
+      else state.mergeGroupSelection.delete(index);
+      renderMergeToolbar();
+    });
     const badge = document.createElement("span");
     badge.className = "merge-group-badge";
     badge.textContent = `组 ${index + 1}`;
     const title = document.createElement("strong");
     title.textContent = stripTopicPrefix(group.suggestedTitle || group.topics[0].title);
-    header.append(badge, title);
+    header.append(groupCheck, badge, title);
     groupBox.append(header);
 
     if (group.reason) {
@@ -824,7 +1073,7 @@ function renderMergeToolbar() {
     mergeNow.textContent = "合并这组";
     mergeNow.addEventListener("click", () => {
       state.mergeSelection = new Set(group.topics.map((topic) => topic.path));
-      handleMergeSelected();
+      handleMergeSelected({ newTitle: group.suggestedTitle });
     });
     actions.append(pick, mergeNow);
     groupBox.append(actions);
@@ -832,26 +1081,33 @@ function renderMergeToolbar() {
   });
 }
 
-async function handleMergeSelected() {
+async function handleMergeSelected({ newTitle } = {}) {
   const paths = [...state.mergeSelection];
   if (paths.length < 2) return;
   const byPath = new Map(state.topics.map((topic) => [topic.path, topic]));
   const titles = paths.map((p) => stripTopicPrefix(byPath.get(p)?.title || p));
   const [primaryPath, ...mergePaths] = paths;
-  const confirmed = window.confirm(
-    `把这 ${paths.length} 张卡合并成一张?\n\n主卡(保留): ${titles[0]}\n并入(归档留底): ${titles.slice(1).join("、")}\n\n并入卡的日历事件会被清理,内容追加进主卡。`,
-  );
+  let confirmText = `把这 ${paths.length} 张卡合并成一张?\n\n主卡(保留): ${titles[0]}\n并入(归档留底): ${titles.slice(1).join("、")}\n\n并入卡的日历事件会被清理,内容追加进主卡。`;
+  if (newTitle && newTitle !== titles[0]) {
+    confirmText += `\n合并后新标题: ${newTitle}`;
+  }
+  const confirmed = window.confirm(confirmText);
   if (!confirmed) return;
 
   state.mergeSubmitting = true;
   renderMergeToolbar();
-  const result = await postAndReload("/api/topics/merge", { primaryPath, mergePaths });
+  const result = await postAndReload("/api/topics/merge", { primaryPath, mergePaths, newTitle });
   state.mergeSubmitting = false;
   if (result) {
     state.mergeSelection = new Set();
-    state.mergeSuggestions = [];
+    const mergedAway = new Set(mergePaths);
+    state.mergeSuggestions = state.mergeSuggestions
+      .map((group) => ({ ...group, topics: (group.topics || []).filter((t) => !mergedAway.has(t.path)) }))
+      .filter((group) => group.topics.length >= 2);
+    state.mergeGroupSelection = new Set();
     const warning = result.calendarWarnings?.length ? `;日历清理警告 ${result.calendarWarnings.length} 条` : "";
-    showToast(`已合并 ${result.merged.length} 张卡进「${stripTopicPrefix(result.topic.title)}」${warning}`);
+    const remaining = state.mergeSuggestions.length ? `;还剩 ${state.mergeSuggestions.length} 组建议待处理` : "";
+    showToast(`已合并 ${result.merged.length} 张卡进「${stripTopicPrefix(result.topic.title)}」${warning}${remaining}`);
   }
   renderBacklog();
 }
@@ -1082,17 +1338,137 @@ function renderCalendar() {
     bindDropZone(column, day.iso);
     const list = column.querySelector(".day-list");
 
-    if (scheduled.length === 0) {
+    const dayEvents = collectExternalEventsForDay(day.iso);
+
+    if (scheduled.length === 0 && dayEvents.timedEvents.length === 0) {
       list.innerHTML = `<div class="empty-state">拖一张选题到这里，选择快捷时段后排进 ${day.label}。</div>`;
     } else {
-      for (const topic of scheduled.sort((a, b) => (a.scheduledStart || "").localeCompare(b.scheduledStart || ""))) {
-        list.append(createTopicCard(topic, { showUnschedule: true, calendar: true }));
+      const merged = [
+        ...scheduled.map((topic) => ({
+          sortKey: topic.scheduledStart || "",
+          isTopic: true,
+          node: createTopicCard(topic, { showUnschedule: true, calendar: true }),
+        })),
+        ...dayEvents.timedEvents.map((event) => ({
+          sortKey: event.start || "",
+          isTopic: false,
+          node: createExternalEventChip(event),
+        })),
+      ].sort((a, b) => {
+        if (a.sortKey !== b.sortKey) return a.sortKey.localeCompare(b.sortKey);
+        return a.isTopic === b.isTopic ? 0 : a.isTopic ? -1 : 1;
+      });
+      for (const item of merged) list.append(item.node);
+    }
+
+    if (dayEvents.allDayEvents.length) {
+      list.prepend(...dayEvents.allDayEvents.map((event) => createExternalEventChip(event)));
+    }
+
+    const doneForDay = state.completedWeek.filter((item) => {
+      if (item.scheduledDate) return item.scheduledDate === day.iso;
+      return item.completedDate === day.iso;
+    });
+    if (doneForDay.length) {
+      const details = document.createElement("details");
+      details.className = "day-done";
+      const summary = document.createElement("summary");
+      summary.textContent = `已完成 ${doneForDay.length}`;
+      details.append(summary);
+      const doneList = document.createElement("div");
+      doneList.className = "day-done-list";
+      for (const item of doneForDay) {
+        const entry = document.createElement("div");
+        entry.className = "day-done-item";
+        const titleSpan = document.createElement("span");
+        titleSpan.className = "day-done-title";
+        titleSpan.textContent = stripTopicPrefix(item.title || "");
+        entry.append(titleSpan);
+        if (item.scheduledStart && item.scheduledEnd) {
+          const timeSpan = document.createElement("span");
+          timeSpan.className = "day-done-time";
+          timeSpan.textContent = `${item.scheduledStart}-${item.scheduledEnd}`;
+          entry.append(timeSpan);
+        }
+        doneList.append(entry);
       }
+      details.append(doneList);
+      column.append(details);
     }
 
     elements.calendarGrid.append(column);
   }
+
+  renderExternalEventsStatus();
 }
+
+function renderExternalEventsStatus() {
+  const el = elements.externalEventsStatus;
+  if (!el) return;
+  if (state.externalEventsLoading) {
+    el.textContent = "外部日程加载中…";
+    el.title = "";
+    el.hidden = false;
+    return;
+  }
+  if (state.externalEventsWarnings.length) {
+    const sources = state.externalEventsWarnings.map((w) => w.source).join("、");
+    el.textContent = `外部日程部分失败：${sources}`;
+    el.title = state.externalEventsWarnings.map((w) => w.message).join("\n");
+    el.hidden = false;
+    return;
+  }
+  if (state.externalEvents.length) {
+    el.textContent = `外部日程 ${state.externalEvents.length} 条`;
+    el.title = "";
+    el.hidden = false;
+    return;
+  }
+  el.textContent = "";
+  el.title = "";
+  el.hidden = true;
+}
+
+function collectExternalEventsForDay(iso) {
+  const allDayEvents = [];
+  const timedEvents = [];
+  for (const event of state.externalEvents) {
+    if (event.date !== iso) continue;
+    if (event.allDay) {
+      allDayEvents.push(event);
+    } else {
+      timedEvents.push(event);
+    }
+  }
+  return { allDayEvents, timedEvents };
+}
+
+function createExternalEventChip(event) {
+  const chip = document.createElement("div");
+  chip.className = "external-event";
+  if (event.allDay) chip.classList.add("all-day");
+  chip.title = event.calendarLabel || "";
+
+  const timeSpan = document.createElement("span");
+  timeSpan.className = "external-event-time";
+  timeSpan.textContent = event.allDay || (!event.start && !event.end)
+    ? "全天"
+    : `${event.start || ""}${event.end ? `–${event.end}` : ""}`;
+  chip.append(timeSpan);
+
+  const titleSpan = document.createElement("span");
+  titleSpan.className = "external-event-title";
+  titleSpan.textContent = event.title;
+  chip.append(titleSpan);
+
+  const sourceSpan = document.createElement("span");
+  sourceSpan.className = "external-event-source";
+  sourceSpan.textContent = event.source === "lark" ? "飞" : "mac";
+  chip.append(sourceSpan);
+
+  return chip;
+}
+
 
 function obsidianOpenUri(relPath) {
   if (!relPath) return "";
@@ -1196,6 +1572,7 @@ function createTopicCard(topic, options = {}) {
     card.classList.remove("dragging");
   });
 
+  const completeBtn = fragment.querySelector('[data-action="complete"]');
   const scheduleBtn = fragment.querySelector('[data-action="schedule"]');
   const unscheduleBtn = fragment.querySelector('[data-action="unschedule"]');
   const revertImportBtn = fragment.querySelector('[data-action="revert-import"]');
@@ -1205,6 +1582,7 @@ function createTopicCard(topic, options = {}) {
     scheduleBtn.textContent = "重新排期";
   }
 
+  completeBtn.addEventListener("click", () => handleCompleteTopic(topic));
   scheduleBtn.addEventListener("click", () => openScheduleDialog(topic, topic.scheduledDate || getCurrentWeekDays()[0].iso));
   if (topic.sourceInboxPath) {
     revertImportBtn.addEventListener("click", () => handleRevertImportedTopic(topic));
@@ -1556,6 +1934,20 @@ async function submitDispose(event) {
   elements.disposeDialog.close();
 }
 
+async function handleCompleteTopic(topic) {
+  const confirmed = window.confirm(
+    `标记「${stripTopicPrefix(topic.title)}」已完成?\n\n卡片会归档留底,日历事件保留。`,
+  );
+  if (!confirmed) return;
+
+  const data = await postAndReload("/api/topics/complete", {
+    path: topic.path,
+  });
+  if (data) {
+    showToast(`已完成并归档:${stripTopicPrefix(topic.title)}`);
+  }
+}
+
 async function handleUnschedule(topic) {
   const hasExternalEvent = Boolean(topic.larkEventId || topic.macosEventId);
   const confirmed = window.confirm(
@@ -1669,7 +2061,7 @@ function renderLarkSetupPanel() {
     ? ""
     : cliVersion
       ? ` · lark-cli ${cliVersion}`
-      : " · 未检测到 lark-cli 版本，建议更新到最新版（npm i -g @larksuite/lark-cli）";
+      : " · 未检测到 lark-cli 版本，建议更新到最新版（npm i -g @larksuite/cli@latest）";
   elements.larkSetupStatus.textContent = `${view.message}${versionNote}`;
   elements.larkSetupBadge.textContent = view.badge;
   elements.larkSetupBadge.className = `status-badge ${view.tone}`;
@@ -2188,9 +2580,19 @@ async function submitPlannerSettings(event) {
     ...plannerDirectories,
     calendarProvider: elements.plannerCalendarProvider.value,
     macosCalendarName: elements.plannerMacosCalendarName.value.trim(),
+    larkCalendarId: elements.plannerLarkCalendarId.value.trim(),
+    larkCalendarName: elements.plannerLarkCalendarId.value.trim()
+      ? (elements.plannerLarkCalendarId.selectedOptions?.[0]?.textContent || "").trim()
+      : "",
     ...getPlannerWikiValues(workspaceMode, workspaceMode === 'standalone' ? '' : getDirectoryPickerValue(elements.plannerVaultRoot)),
     dailyCapacity: state.settings?.dailyCapacity || RECOMMENDED_DAILY_CAPACITY,
     scheduleTimeSlots: getScheduleTimeSlots(),
+    externalLarkCalendarIds: Array.from(
+      document.querySelectorAll('#externalLarkCalendarList input[type=checkbox]:checked'),
+    ).map((input) => input.value),
+    externalMacosCalendarNames: Array.from(
+      document.querySelectorAll('#externalMacosCalendarList input[type=checkbox]:checked'),
+    ).map((input) => input.value),
   };
 
   setBusy(true);
@@ -2219,6 +2621,7 @@ async function submitPlannerSettings(event) {
     }
     elements.plannerSettingsHint.textContent = '目录设置已保存。';
     await loadTopics();
+    loadExternalEvents();
     await loadSettingsDiagnostics();
   } catch (error) {
     elements.plannerSettingsHint.textContent = error.message;

@@ -112,10 +112,139 @@ function planCalendarCleanup(topic = {}) {
   return actions;
 }
 
+// 纯日期字符串("YYYY-MM-DD")加一天,只做日历分量算术,不涉及时区换算。
+function addOneDay(dateString) {
+  const [year, month, day] = dateString.split("-").map(Number);
+  const next = new Date(Date.UTC(year, month - 1, day + 1));
+  const y = next.getUTCFullYear();
+  const m = String(next.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(next.getUTCDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+// 只读聚合:按日历名批量列出窗口内(重叠判定,覆盖跨天/跨周事件)的事件。
+// 输出每行一个 TSV,字段固定 15 列,便于 parseMacOSEventLines 解析。
+// 总行数硬顶 300,避免用户误配一个巨型日历时脚本长时间卡住 Calendar.app。
+function buildListEventsScript({ calendarNames = [], startDate, endDate } = {}) {
+  const names = (calendarNames || []).filter(Boolean);
+  const windowEndDate = addOneDay(endDate);
+  const windowStartScript = buildAppleScriptDate("windowStart", startDate, "00:00");
+  const windowEndScript = buildAppleScriptDate("windowEnd", windowEndDate, "00:00");
+  const nameList = names.map(toAppleScriptString).join(", ");
+  return `
+on sanitizeListField(sourceText)
+  set prevDelims to AppleScript's text item delimiters
+  set AppleScript's text item delimiters to tab
+  set sourceText to (text items of sourceText) as string
+  set AppleScript's text item delimiters to " "
+  set sourceText to (text items of sourceText) as string
+  set AppleScript's text item delimiters to linefeed
+  set sourceText to (text items of sourceText) as string
+  set AppleScript's text item delimiters to " "
+  set sourceText to (text items of sourceText) as string
+  set AppleScript's text item delimiters to return
+  set sourceText to (text items of sourceText) as string
+  set AppleScript's text item delimiters to " "
+  set sourceText to (text items of sourceText) as string
+  set AppleScript's text item delimiters to prevDelims
+  return sourceText
+end sanitizeListField
+
+tell application id "com.apple.iCal"
+${windowStartScript}
+${windowEndScript}
+  set targetNames to {${nameList}}
+  set outputLines to {}
+  set lineCount to 0
+  set maxLines to 300
+  repeat with targetName in targetNames
+    if lineCount >= maxLines then exit repeat
+    set targetCalendar to missing value
+    repeat with candidateCalendar in calendars
+      if name of candidateCalendar is (targetName as string) then
+        set targetCalendar to candidateCalendar
+        exit repeat
+      end if
+    end repeat
+    if targetCalendar is not missing value then
+      set matchingEvents to every event of targetCalendar whose start date < windowEnd and end date > windowStart
+      repeat with candidateEvent in matchingEvents
+        if lineCount >= maxLines then exit repeat
+        set eventUid to uid of candidateEvent
+        set eventSummary to my sanitizeListField((summary of candidateEvent) as string)
+        set isAllDay to (allday event of candidateEvent)
+        set eventStart to start date of candidateEvent
+        set eventEnd to end date of candidateEvent
+        set eventDescription to ""
+        try
+          set eventDescription to (description of candidateEvent) as string
+        end try
+        set hasMarker to eventDescription contains "topic_id: "
+        set lineText to (targetName as string) & tab & (eventUid as string) & tab & eventSummary & tab & (isAllDay as string) & tab & (year of eventStart as string) & tab & (month of eventStart as integer as string) & tab & (day of eventStart as string) & tab & (hours of eventStart as string) & tab & (minutes of eventStart as string) & tab & (year of eventEnd as string) & tab & (month of eventEnd as integer as string) & tab & (day of eventEnd as string) & tab & (hours of eventEnd as string) & tab & (minutes of eventEnd as string) & tab & (hasMarker as string)
+        set end of outputLines to lineText
+        set lineCount to lineCount + 1
+      end repeat
+    end if
+  end repeat
+  set prevDelims to AppleScript's text item delimiters
+  set AppleScript's text item delimiters to linefeed
+  set outputText to outputLines as string
+  set AppleScript's text item delimiters to prevDelims
+  return outputText
+end tell
+`;
+}
+
+// buildListEventsScript 输出的反解析。字段数不对的行(如脚本被打断、手工造的坏数据)整行跳过,
+// 不让单行脏数据拖垮整个响应。
+function parseMacOSEventLines(output) {
+  const lines = String(output || "").split(/\r?\n/);
+  const events = [];
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    const fields = line.split("\t");
+    if (fields.length !== 15) continue;
+    const [
+      calendarName,
+      uid,
+      title,
+      alldayText,
+      startYear,
+      startMonth,
+      startDay,
+      startHours,
+      startMinutes,
+      endYear,
+      endMonth,
+      endDay,
+      endHours,
+      endMinutes,
+      hasTopicMarkerText,
+    ] = fields;
+    const allDay = alldayText === "true";
+    const startDate = `${startYear}-${String(startMonth).padStart(2, "0")}-${String(startDay).padStart(2, "0")}`;
+    const endDate = `${endYear}-${String(endMonth).padStart(2, "0")}-${String(endDay).padStart(2, "0")}`;
+    events.push({
+      calendarName,
+      uid,
+      title,
+      allDay,
+      startDate,
+      startTime: allDay ? "" : `${String(startHours).padStart(2, "0")}:${String(startMinutes).padStart(2, "0")}`,
+      endDate,
+      endTime: allDay ? "" : `${String(endHours).padStart(2, "0")}:${String(endMinutes).padStart(2, "0")}`,
+      hasTopicMarker: hasTopicMarkerText === "true",
+    });
+  }
+  return events;
+}
+
 export {
   buildAppleScriptDate,
   buildBatchCalendarCleanupScript,
   buildDeleteEventsByTopicScript,
+  buildListEventsScript,
+  parseMacOSEventLines,
   planCalendarCleanup,
   toAppleScriptString,
 };

@@ -14,6 +14,13 @@ const DEFAULT_DIRS = {
 const DEFAULT_CALENDAR = {
   calendarProvider: 'none',
   macosCalendarName: '',
+  larkCalendarId: '',
+  larkCalendarName: '',
+};
+
+const DEFAULT_EXTERNAL_CALENDAR = {
+  externalLarkCalendarIds: [],
+  externalMacosCalendarNames: [],
 };
 
 const DEFAULT_WIKI = {
@@ -47,9 +54,26 @@ function createDefaultPlannerSettings(projectRoot = process.cwd()) {
     ...DEFAULT_WORKSPACE,
     ...DEFAULT_DIRS,
     ...DEFAULT_CALENDAR,
+    ...DEFAULT_EXTERNAL_CALENDAR,
     ...DEFAULT_WIKI,
     ...DEFAULT_SCHEDULE,
   };
+}
+
+// 只读聚合源列表:非数组回退到空数组;元素 trim 后滤空;去重;上限 10 条截断,
+// 避免用户误粘贴超长列表拖慢每次外部日历拉取。
+function normalizeStringListField(value, { max = 10 } = {}) {
+  const list = Array.isArray(value) ? value : [];
+  const seen = new Set();
+  const result = [];
+  for (const item of list) {
+    const trimmed = String(item ?? '').trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    result.push(trimmed);
+    if (result.length >= max) break;
+  }
+  return result;
 }
 
 function trimTrailingSlashes(value) {
@@ -148,6 +172,10 @@ function normalizePlannerSettings(settings = {}, projectRoot = process.cwd()) {
     archiveDir: normalizeDirForMode(settings.archiveDir, defaults.archiveDir, workspaceMode),
     calendarProvider: normalizeCalendarProvider(settings.calendarProvider, defaults.calendarProvider),
     macosCalendarName: String(settings.macosCalendarName || defaults.macosCalendarName).trim(),
+    larkCalendarId: String(settings.larkCalendarId || defaults.larkCalendarId).trim(),
+    larkCalendarName: String(settings.larkCalendarName || defaults.larkCalendarName).trim(),
+    externalLarkCalendarIds: normalizeStringListField(settings.externalLarkCalendarIds),
+    externalMacosCalendarNames: normalizeStringListField(settings.externalMacosCalendarNames),
     wikiMode: normalizeWikiMode(settings.wikiMode, defaults.wikiMode),
     wikiDir: normalizeRelativeDir(settings.wikiDir, defaults.wikiDir),
     wikiIndexPath: normalizeRelativeDir(settings.wikiIndexPath, defaults.wikiIndexPath),

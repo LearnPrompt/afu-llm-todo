@@ -206,6 +206,19 @@
                   </select>
                   <span id="plannerMacosCalendarStatus" class="form-hint">只显示 Calendar.app 里可写入的日历。</span>
                 </label>
+                <label>
+                  飞书目标日历
+                  <select id="plannerLarkCalendarId">
+                    <option value="">主日历(默认)</option>
+                  </select>
+                  <span id="plannerLarkCalendarStatus" class="form-hint">默认同步到主日历。</span>
+                </label>
+                <div class="directory-field" id="externalCalendarSection">
+                  <label>周面板外部日程</label>
+                  <span class="form-hint">勾选要在周面板上只读显示的日历；不勾选则跟随上面的同步目标。</span>
+                  <div class="external-calendar-list" id="externalLarkCalendarList"></div>
+                  <div class="external-calendar-list" id="externalMacosCalendarList"></div>
+                </div>
               </div>
               <div id="vaultLinkBanner" class="settings-diag-banner vault-link-banner" hidden>
                 <span id="vaultLinkMessage"></span>
@@ -233,6 +246,7 @@
         <div class="toolbar-right">
           <button id="prevWeekBtn" type="button">上一周</button>
           <div id="weekLabel" class="week-label"></div>
+          <span id="externalEventsStatus" class="form-hint" hidden></span>
           <button id="nextWeekBtn" type="button">下一周</button>
           <button id="refreshBtn" class="accent-btn" type="button">刷新</button>
         </div>
@@ -526,6 +540,7 @@
         </div>
         <div class="topic-tags"></div>
         <div class="topic-actions">
+          <button class="mini-btn" data-action="complete" type="button">完成</button>
           <button class="mini-btn" data-action="schedule" type="button">排期</button>
           <button class="mini-btn" data-action="unschedule" type="button">取消排期</button>
           <button class="mini-btn" data-action="revert-import" type="button">撤回转卡</button>

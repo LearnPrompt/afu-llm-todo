@@ -4,6 +4,8 @@ import assert from 'node:assert/strict';
 import {
   buildBatchCalendarCleanupScript,
   buildDeleteEventsByTopicScript,
+  buildListEventsScript,
+  parseMacOSEventLines,
   planCalendarCleanup,
   toAppleScriptString,
 } from '../macos-calendar.mjs';
@@ -89,4 +91,83 @@ test('buildBatchCalendarCleanupScript tolerates empty input', () => {
   const script = buildBatchCalendarCleanupScript();
   assert.ok(script.includes('set targetUids to {}'));
   assert.ok(script.includes('set targetLines to {}'));
+});
+
+test('buildListEventsScript embeds calendar names, the window date components, and the 300 hard cap', () => {
+  const script = buildListEventsScript({
+    calendarNames: ['工作', '生活'],
+    startDate: '2026-07-14',
+    endDate: '2026-07-16',
+  });
+
+  assert.ok(script.includes('"工作"'));
+  assert.ok(script.includes('"生活"'));
+  // windowStart at startDate 00:00
+  assert.ok(script.includes('set year of windowStart to 2026'));
+  assert.ok(script.includes('set day of windowStart to 14'));
+  // windowEnd rolls to the day *after* endDate (exclusive upper bound)
+  assert.ok(script.includes('set year of windowEnd to 2026'));
+  assert.ok(script.includes('set day of windowEnd to 17'));
+  assert.ok(script.includes('start date < windowEnd and end date > windowStart'));
+  assert.ok(script.includes('maxLines to 300'));
+});
+
+test('buildListEventsScript rolls the window end over a month/year boundary', () => {
+  const script = buildListEventsScript({
+    calendarNames: ['工作'],
+    startDate: '2026-12-30',
+    endDate: '2026-12-31',
+  });
+
+  assert.ok(script.includes('set year of windowEnd to 2027'));
+  assert.ok(script.includes('set month of windowEnd to January'));
+  assert.ok(script.includes('set day of windowEnd to 1'));
+});
+
+test('parseMacOSEventLines parses a normal timed event line', () => {
+  const line = ['工作', 'uid-1', 'Standup', 'false', '2026', '7', '14', '9', '5', '2026', '7', '14', '9', '30', 'false'].join('\t');
+  const events = parseMacOSEventLines(line);
+  assert.deepEqual(events, [{
+    calendarName: '工作',
+    uid: 'uid-1',
+    title: 'Standup',
+    allDay: false,
+    startDate: '2026-07-14',
+    startTime: '09:05',
+    endDate: '2026-07-14',
+    endTime: '09:30',
+    hasTopicMarker: false,
+  }]);
+});
+
+test('parseMacOSEventLines blanks out times for an all-day event', () => {
+  const line = ['生活', 'uid-2', 'Birthday', 'true', '2026', '7', '14', '0', '0', '2026', '7', '15', '0', '0', 'false'].join('\t');
+  const [event] = parseMacOSEventLines(line);
+  assert.equal(event.allDay, true);
+  assert.equal(event.startTime, '');
+  assert.equal(event.endTime, '');
+  assert.equal(event.startDate, '2026-07-14');
+  assert.equal(event.endDate, '2026-07-15');
+});
+
+test('parseMacOSEventLines flags events carrying a topic_id marker', () => {
+  const line = ['工作', 'uid-3', 'Synced', 'false', '2026', '7', '14', '9', '0', '2026', '7', '14', '10', '0', 'true'].join('\t');
+  const [event] = parseMacOSEventLines(line);
+  assert.equal(event.hasTopicMarker, true);
+});
+
+test('parseMacOSEventLines skips malformed lines and blank lines', () => {
+  const goodLine = ['工作', 'uid-4', 'OK', 'false', '2026', '7', '14', '9', '0', '2026', '7', '14', '10', '0', 'false'].join('\t');
+  const shortLine = ['工作', 'uid-5', 'Bad'].join('\t');
+  const output = [goodLine, '', shortLine, '   '].join('\n');
+  const events = parseMacOSEventLines(output);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].uid, 'uid-4');
+});
+
+test('parseMacOSEventLines pads single-digit month/day/hour/minute components', () => {
+  const line = ['工作', 'uid-6', 'Pad', 'false', '2026', '1', '5', '9', '5', '2026', '1', '5', '9', '5', 'false'].join('\t');
+  const [event] = parseMacOSEventLines(line);
+  assert.equal(event.startDate, '2026-01-05');
+  assert.equal(event.startTime, '09:05');
 });

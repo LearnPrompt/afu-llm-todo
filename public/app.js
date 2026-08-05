@@ -1778,11 +1778,12 @@ function createInboxCandidateCard(candidate) {
   actions.append(dismissBtn);
 
   const inboxRefetchReasons = candidate.reasons || [];
-  if (inboxRefetchReasons.includes('缺少原始链接') || inboxRefetchReasons.includes('内容疑似未完整抓取')) {
+  const refetchLabel = getInboxRefetchLabel(candidate, inboxRefetchReasons);
+  if (refetchLabel) {
     const refetchBtn = document.createElement('button');
     refetchBtn.className = 'mini-btn';
     refetchBtn.type = 'button';
-    refetchBtn.textContent = '重新抓取';
+    refetchBtn.textContent = refetchLabel;
     refetchBtn.addEventListener('click', () => {
       refetchInboxCandidate(candidate, refetchBtn, card);
     });
@@ -1792,6 +1793,24 @@ function createInboxCandidateCard(candidate) {
   card.append(actions);
 
   return card;
+}
+
+function getInboxRefetchLabel(candidate, reasons = []) {
+  try {
+    const url = new URL(candidate.sourceUrl || '');
+    const host = url.hostname.toLowerCase();
+    if (['threads.com', 'www.threads.com', 'threads.net', 'www.threads.net'].includes(host)) {
+      return '抓取 Threads 正文';
+    }
+    if (['instagram.com', 'www.instagram.com'].includes(host) && /^\/(?:reel|p|tv)\//i.test(url.pathname)) {
+      return '转写 Instagram Reel';
+    }
+  } catch {
+    // Existing reason-based fallback below handles malformed or missing URLs.
+  }
+  return reasons.includes('缺少原始链接') || reasons.includes('内容疑似未完整抓取')
+    ? '重新抓取'
+    : '';
 }
 
 function bindInboxCandidateEditor(element, options) {
@@ -2448,6 +2467,7 @@ async function refetchInboxCandidate(candidate, button, card) {
       return;
     }
     await loadTopics();
+    showToast(data.message || '抓取完成');
   } catch (error) {
     card.querySelector('.inbox-refetch-error')?.remove();
     const warning = document.createElement('p');

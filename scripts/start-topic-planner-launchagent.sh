@@ -7,7 +7,7 @@ LOG_DIR="$HOME/Library/Logs/Afu"
 
 mkdir -p "$LOG_DIR"
 
-export PATH="$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
+export PATH="$HOME/.local/bin:$HOME/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 export PORT="${PORT:-4317}"
 unset MEM0_API_KEY OPENAI_API_KEY ANTHROPIC_API_KEY
 

@@ -37,6 +37,14 @@ import {
   savePlannerSettings,
 } from "./topic-planner-config.mjs";
 import {
+  fetchThreadsThread,
+  findRecoverableSocialUrl,
+  isInstagramUrl,
+  isThreadsUrl,
+  upsertInstagramMarkdownSection,
+  upsertThreadsMarkdownSection,
+} from "./threads-fetch.mjs";
+import {
   appendWikiLog,
   buildTodoCandidateStore,
   buildTodoCandidatesFromWiki,
@@ -1268,16 +1276,25 @@ async function setInboxFileProcessed(sourcePath) {
   return { ok: true, sourcePath: relPath };
 }
 
-const INBOX_SHORT_LINK_PATTERN = /https?:\/\/(?:v\.douyin\.com|xhslink\.com|b23\.tv)\/[A-Za-z0-9\/]+/;
 const REFETCH_SCRIPT_PATH = path.join(process.env.HOME || "", "projects/paoding-skill/skills/paoding/scripts/collect.sh");
 const REFETCH_TIMEOUT_MS = 300000;
+const WHISPER_TIMEOUT_MS = 300000;
 
-function runRefetchScript(url, tmpDir) {
+function runRefetchScript(url, tmpDir, { browser = "chrome" } = {}) {
   return new Promise((resolve) => {
-    const child = spawn("bash", [REFETCH_SCRIPT_PATH, url, tmpDir, "--browser", "chrome"]);
+    const args = [REFETCH_SCRIPT_PATH, url, tmpDir];
+    if (browser) args.push("--browser", browser);
+    const child = spawn("bash", args);
     let stdout = "";
     let stderr = "";
     let timedOut = false;
+    let settled = false;
+
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
 
     const timer = setTimeout(() => {
       timedOut = true;
@@ -1290,11 +1307,160 @@ function runRefetchScript(url, tmpDir) {
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
     });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      finish({ code: null, stdout, stderr: `${stderr}${error.message}`, timedOut: false });
+    });
     child.on("close", (code) => {
       clearTimeout(timer);
-      resolve({ code, stdout, stderr, timedOut });
+      finish({ code, stdout, stderr, timedOut });
     });
   });
+}
+
+function runInstagramDownload(url, tmpDir, { browser = "" } = {}) {
+  return new Promise((resolve) => {
+    const args = [
+      "-x",
+      "--audio-format", "mp3",
+      "--no-playlist",
+      "--write-info-json",
+      "-o", "S%(autonumber)02d-%(title).60s.%(ext)s",
+    ];
+    if (browser) args.push("--cookies-from-browser", browser);
+    args.push(url);
+    const child = spawn("yt-dlp", args, { cwd: tmpDir });
+    let stderr = "";
+    let timedOut = false;
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, REFETCH_TIMEOUT_MS);
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      finish({ code: null, stderr: `${stderr}${error.message}`, timedOut: false });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      finish({ code, stderr, timedOut });
+    });
+  });
+}
+
+function runWhisperAuto(audioPath, outputDir) {
+  return new Promise((resolve) => {
+    const child = spawn("whisper", [
+      audioPath,
+      "--model", "tiny",
+      "--output_format", "txt",
+      "--output_dir", outputDir,
+      "--fp16", "False",
+      "--verbose", "False",
+    ]);
+    let stderr = "";
+    let timedOut = false;
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, WHISPER_TIMEOUT_MS);
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => {
+      clearTimeout(timer);
+      finish({ code: null, stderr: `${stderr}${error.message}`, timedOut: false });
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      finish({ code, stderr, timedOut });
+    });
+  });
+}
+
+async function readInstagramCapture(collectorDir, files) {
+  const transcriptFile = files.find((name) => name.endsWith(".txt"));
+  let transcript = transcriptFile ? await fs.readFile(path.join(collectorDir, transcriptFile), "utf8") : "";
+  let transcriptionWarning = "";
+  const audioFile = files.find((name) => name.endsWith(".mp3"));
+  if (audioFile) {
+    const autoDir = path.join(collectorDir, "whisper-auto");
+    await fs.mkdir(autoDir, { recursive: true });
+    const autoResult = await runWhisperAuto(path.join(collectorDir, audioFile), autoDir);
+    if (!autoResult.timedOut && autoResult.code === 0) {
+      const autoFiles = await fs.readdir(autoDir);
+      const autoTranscriptFile = autoFiles.find((name) => name.endsWith(".txt"));
+      if (autoTranscriptFile) {
+        transcript = await fs.readFile(path.join(autoDir, autoTranscriptFile), "utf8");
+      }
+    } else {
+      transcriptionWarning = autoResult.timedOut
+        ? "Whisper 自动语言识别超时，已保留原转写。"
+        : `Whisper 自动语言识别失败，已保留原转写：${autoResult.stderr.slice(0, 180)}`;
+    }
+  }
+
+  const infoFile = files.find((name) => name.endsWith(".info.json"));
+  let description = "";
+  if (infoFile) {
+    try {
+      const info = JSON.parse(await fs.readFile(path.join(collectorDir, infoFile), "utf8"));
+      description = optionalString(info.description || info.title);
+    } catch {
+      // A damaged metadata file should not discard a valid transcript.
+    }
+  }
+
+  return {
+    description,
+    transcript: transcript.trim(),
+    warning: transcriptionWarning,
+  };
+}
+
+async function refetchThreadsInboxCandidate({ absolutePath, frontmatter, raw, relPath, sourceUrl }) {
+  try {
+    const thread = await fetchThreadsThread(sourceUrl);
+    const date = new Date().toISOString().slice(0, 10);
+    let updatedRaw = upsertThreadsMarkdownSection(raw, thread, date);
+    updatedRaw = patchFrontmatterField(updatedRaw, "url", thread.canonicalUrl);
+    if (!optionalString(frontmatter.author) || optionalString(frontmatter.author).toLowerCase() === "unknown") {
+      updatedRaw = patchFrontmatterField(updatedRaw, "author", thread.author);
+    }
+    await fs.writeFile(absolutePath, updatedRaw, "utf8");
+    const replyCount = Math.max(0, thread.posts.length - 1);
+    return {
+      ok: true,
+      platform: "threads",
+      message: replyCount
+        ? `已抓取 Threads 主帖和 ${replyCount} 条作者连续回复`
+        : "已抓取 Threads 主帖",
+      sourcePath: relPath,
+      url: thread.canonicalUrl,
+      postCount: thread.posts.length,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      platform: "threads",
+      reason: "threads_fetch_failed",
+      message: error.message || "Threads 正文抓取失败",
+    };
+  }
 }
 
 async function refetchInboxCandidate({ sourcePath }) {
@@ -1309,9 +1475,9 @@ async function refetchInboxCandidate({ sourcePath }) {
   let sourceUrl = optionalString(frontmatter.url || frontmatter.source_url || "");
   let urlIsNew = false;
   if (!sourceUrl) {
-    const bodyMatch = String(body || "").match(INBOX_SHORT_LINK_PATTERN);
-    if (bodyMatch) {
-      sourceUrl = bodyMatch[0];
+    const recoveredUrl = findRecoverableSocialUrl(body);
+    if (recoveredUrl) {
+      sourceUrl = recoveredUrl;
       urlIsNew = true;
     }
   }
@@ -1319,26 +1485,72 @@ async function refetchInboxCandidate({ sourcePath }) {
     throw badRequest("正文里也没找到可识别的分享链接，需要人工补链接");
   }
 
+  if (isThreadsUrl(sourceUrl)) {
+    const result = await refetchThreadsInboxCandidate({
+      absolutePath,
+      frontmatter,
+      raw,
+      relPath,
+      sourceUrl,
+    });
+    await appendPlannerLog("inbox-refetch", path.basename(relPath, ".md"), {
+      source: relPath,
+      reason: result.reason || "success",
+      code: "threads",
+    });
+    return result;
+  }
+
   const tmpDir = path.join(os.tmpdir(), `afu-refetch-${Date.now()}`);
   await fs.mkdir(tmpDir, { recursive: true });
-
-  const { code, stderr, timedOut } = await runRefetchScript(sourceUrl, tmpDir);
+  const instagram = isInstagramUrl(sourceUrl);
+  let collectorDir = tmpDir;
+  let collector = instagram
+    ? await runInstagramDownload(sourceUrl, collectorDir)
+    : await runRefetchScript(sourceUrl, collectorDir, { browser: "chrome" });
+  if (instagram && !collector.timedOut && collector.code !== 0) {
+    collectorDir = path.join(tmpDir, "browser-retry");
+    await fs.mkdir(collectorDir, { recursive: true });
+    collector = await runInstagramDownload(sourceUrl, collectorDir, { browser: "chrome" });
+  }
+  if (instagram && !collector.timedOut && collector.code !== 0) collector.code = 4;
+  const { code, stderr, timedOut } = collector;
 
   let result;
   if (!timedOut && code === 0) {
-    const files = await fs.readdir(tmpDir);
+    const files = await fs.readdir(collectorDir);
     const transcriptFile = files.find((name) => name.endsWith(".txt"));
-    const transcript = transcriptFile ? await fs.readFile(path.join(tmpDir, transcriptFile), "utf8") : "";
+    let transcript = transcriptFile ? await fs.readFile(path.join(collectorDir, transcriptFile), "utf8") : "";
+    let transcriptionWarning = "";
+    let instagramCapture = null;
+    if (instagram) {
+      instagramCapture = await readInstagramCapture(collectorDir, files);
+      transcript = instagramCapture.transcript || transcript;
+      transcriptionWarning = instagramCapture.warning;
+    }
     const date = new Date().toISOString().slice(0, 10);
     const section = ["", `## 补充素材（抓取日期 ${date}）`, `- 来源链接：${sourceUrl}`, "", transcript, ""].join("\n");
-
-    let updatedRaw = raw + section;
+    let updatedRaw = instagram
+      ? upsertInstagramMarkdownSection(raw, {
+          sourceUrl,
+          description: instagramCapture?.description || "",
+          transcript,
+        }, date)
+      : raw + section;
     if (urlIsNew) {
       updatedRaw = patchFrontmatterField(updatedRaw, "url", sourceUrl);
     }
     await fs.writeFile(absolutePath, updatedRaw, "utf8");
 
-    result = { ok: true, message: "已追加转写内容", sourcePath: relPath, url: sourceUrl };
+    result = {
+      ok: true,
+      platform: instagram ? "instagram" : "video",
+      message: instagram ? "已更新 Instagram Reel 说明与转写内容" : "已追加转写内容",
+      sourcePath: relPath,
+      url: sourceUrl,
+      ...(transcriptionWarning ? { warning: transcriptionWarning } : {}),
+    };
+    await fs.rm(tmpDir, { recursive: true, force: true });
   } else if (timedOut) {
     result = {
       ok: false,
@@ -1353,7 +1565,7 @@ async function refetchInboxCandidate({ sourcePath }) {
     result = {
       ok: false,
       reason: "transcribe_failed",
-      message: `${stderr.slice(0, 500)}（音频已保留在 ${tmpDir}，可手动重试）`,
+      message: `${stderr.slice(0, 500)}（音频已保留在 ${collectorDir}，可手动重试）`,
     };
   } else {
     result = {

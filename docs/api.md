@@ -23,12 +23,21 @@ Afu 的网页 UI 使用本地 HTTP API。默认端口是 `4317`。
 - `POST /api/inbox/import`
 - `POST /api/inbox/import-batch`
 - `POST /api/inbox/archive`
+- `POST /api/inbox/refetch`
 
 单条和批量导入允许传入用户手动修改后的 `title` 与 `excerpt`。修改只作用于即将生成的选题卡，不会改写收件箱原文。
 
 `/api/inbox/archive` 不永久删除素材，而是将文件移动到 `archiveRoot/<年份>/收件箱/<原相对路径>`；同名文件会自动追加 `-02`、`-03` 等序号。
 
 收件箱列表中的来源路径使用 Obsidian URI。按住 Cmd 点击可直接在 Obsidian 打开对应文件。
+
+重新抓取会按平台分流：
+
+- Threads：解析 `/share/...` 到真实帖子，从公开页面内嵌数据提取主帖与作者连续回复，并以带标记的可更新区块写回 Markdown
+- Instagram Reel：使用 `yt-dlp` 下载单条音轨，使用 `openai-whisper` 自动识别语言并转写，同时保留 Reel 的公开说明文字
+- 抖音、小红书、B站等既有视频链接：继续使用庖丁采集脚本
+
+Instagram 和其他视频转写要求 `yt-dlp`、`ffmpeg`、`whisper` 位于服务的 `PATH`。推荐使用 `uv tool install yt-dlp` 与 `uv tool install openai-whisper` 安装前两项 Python 工具。
 
 Wiki Mode：
 

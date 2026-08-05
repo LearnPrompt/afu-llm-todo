@@ -66,6 +66,7 @@ async function spawnPlannerServer({ calendarProvider = 'none', larkStub, setting
       STUB_LOG: stubLogPath,
       HOME: workRoot,
       DEEPSEEK_API_KEY: '',
+      TOPIC_PLANNER_TIME_ZONE: 'Asia/Shanghai',
       ...(extraEnv || {}),
     },
     stdio: ['ignore', 'pipe', 'pipe'],

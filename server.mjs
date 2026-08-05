@@ -45,7 +45,9 @@ const PROJECT_ROOT = __dirname;
 const PUBLIC_DIR = path.join(PROJECT_ROOT, "public");
 const SAMPLE_VAULT_ROOT = path.join(PROJECT_ROOT, "examples", "sample-vault");
 const PORT = Number(process.env.PORT || 4317);
-const TIMEZONE = "Asia/Shanghai";
+const TIMEZONE = normalizeTimeZone(
+  process.env.TOPIC_PLANNER_TIME_ZONE || Intl.DateTimeFormat().resolvedOptions().timeZone,
+);
 const LARK_CLI_CANDIDATES = [
   process.env.LARK_CLI_PATH,
   process.env.HOME ? path.join(process.env.HOME, ".npm-global/bin/lark-cli") : "",
@@ -219,6 +221,10 @@ createServer(async (req, res) => {
 
     if (url.pathname === "/api/lark/repair/finish" && req.method === "POST") {
       return respondJson(res, await finishLarkAuthRepair());
+    }
+
+    if (url.pathname === "/api/lark/calendars" && req.method === "GET") {
+      return respondJson(res, await getLarkCalendarsPayload());
     }
 
     if (url.pathname === "/api/macos/calendars" && req.method === "GET") {
@@ -2317,7 +2323,8 @@ async function syncTopicToLark({ title, topic, path: topicPath }) {
     };
   }
 
-  const calendarId = await getTargetLarkCalendarId();
+  const settings = await getPlannerSettings();
+  const calendarId = settings.larkCalendarId || topic.lark_calendar_id || (await getPrimaryCalendarId());
   const startTs = toEpochSeconds(topic.scheduled_date, topic.scheduled_start);
   const endTs = toEpochSeconds(topic.scheduled_date, topic.scheduled_end);
   const data = {
@@ -3001,9 +3008,52 @@ function normalizeTimeString(value) {
   return /^\d{2}:\d{2}$/.test(text) ? text : "";
 }
 
-function toEpochSeconds(date, time) {
-  const iso = `${date}T${time}:00+08:00`;
-  return Math.floor(new Date(iso).getTime() / 1000);
+function toEpochSeconds(date, time, timeZone = TIMEZONE) {
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.split(":").map(Number);
+  const baseUtc = Date.UTC(year, month - 1, day, hour, minute, 0);
+  let resolvedUtc = baseUtc;
+
+  for (let index = 0; index < 3; index += 1) {
+    const offset = getTimeZoneOffsetMs(new Date(resolvedUtc), timeZone);
+    const nextUtc = baseUtc - offset;
+    if (nextUtc === resolvedUtc) break;
+    resolvedUtc = nextUtc;
+  }
+
+  return Math.floor(resolvedUtc / 1000);
+}
+
+function getTimeZoneOffsetMs(date, timeZone) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const zonedAsUtc = Date.UTC(
+    Number(values.year),
+    Number(values.month) - 1,
+    Number(values.day),
+    Number(values.hour),
+    Number(values.minute),
+    Number(values.second),
+  );
+  return zonedAsUtc - date.getTime();
+}
+
+function normalizeTimeZone(value) {
+  const candidate = optionalString(value) || "UTC";
+  try {
+    return Intl.DateTimeFormat(undefined, { timeZone: candidate }).resolvedOptions().timeZone;
+  } catch {
+    return "UTC";
+  }
 }
 
 function normalizeCalendarProvider(value) {

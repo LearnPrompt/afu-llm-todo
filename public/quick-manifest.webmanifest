@@ -1,0 +1,26 @@
+{
+  "name": "阿福 Quick · 快速过卡",
+  "short_name": "阿福 Quick",
+  "description": "在手机上快速判断、排期或拒绝 Afu Todo 卡。",
+  "lang": "zh-CN",
+  "start_url": "/quick",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f7efe4",
+  "theme_color": "#f7efe4",
+  "icons": [
+    {
+      "src": "/quick-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/quick-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

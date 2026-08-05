@@ -94,6 +94,14 @@ open http://localhost:4317
 
 你会看到三条 sample 素材。把它们送进 Wiki，生成待办卡，再拖进周排期。
 
+手机上快速判断和排期，打开：
+
+```bash
+open http://localhost:4317/quick
+```
+
+`/quick` 提供今天、明天、日期选择、稍后和拒绝动作；排期结果继续写回同一份 Markdown 数据。手机需与运行 Afu 的 Mac 位于同一网络或 Tailnet。
+
 ## 不需要跟我一模一样的 Vault，你可以随便改
 
 默认 sample vault 用的是这几个目录：

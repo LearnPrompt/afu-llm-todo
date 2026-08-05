@@ -199,6 +199,22 @@ function makeTopicFilename(title) {
   return `【选题】${safe}.md`;
 }
 
+function buildInboxArchiveRelativePath({ sourcePath, inboxRoot, year }) {
+  const absoluteInboxRoot = path.resolve(inboxRoot);
+  const absoluteSourcePath = path.resolve(sourcePath);
+  const sourceRelativePath = path.relative(absoluteInboxRoot, absoluteSourcePath);
+  if (
+    !sourceRelativePath
+    || sourceRelativePath.startsWith(`..${path.sep}`)
+    || sourceRelativePath === '..'
+    || path.isAbsolute(sourceRelativePath)
+  ) {
+    throw new Error('只能归档收件箱目录内的文件');
+  }
+  const archiveYear = /^\d{4}$/.test(String(year || '')) ? String(year) : String(new Date().getFullYear());
+  return path.join(archiveYear, '收件箱', sourceRelativePath);
+}
+
 function buildTopicDraftFromInbox(candidate, today = new Date().toISOString().slice(0, 10)) {
   const frontmatter = {
     type: '选题策划',
@@ -259,7 +275,35 @@ function buildTopicDraftFromInbox(candidate, today = new Date().toISOString().sl
   };
 }
 
+function applyInboxCandidateEdits(candidate, edits = {}) {
+  const hasTitleEdit = Object.prototype.hasOwnProperty.call(edits, 'title');
+  const hasExcerptEdit = Object.prototype.hasOwnProperty.call(edits, 'excerpt');
+  const title = hasTitleEdit ? normalizeWhitespace(edits.title) : candidate.title;
+  const excerpt = hasExcerptEdit ? normalizeWhitespace(edits.excerpt) : candidate.excerpt;
+
+  if (!title) {
+    throw new Error('人工标题不能为空');
+  }
+  if (title.length > 160) {
+    throw new Error('人工标题不能超过 160 个字符');
+  }
+  if (!excerpt) {
+    throw new Error('人工内容不能为空');
+  }
+  if (excerpt.length > 2000) {
+    throw new Error('人工内容不能超过 2000 个字符');
+  }
+
+  return {
+    ...candidate,
+    title,
+    excerpt,
+  };
+}
+
 export {
+  applyInboxCandidateEdits,
+  buildInboxArchiveRelativePath,
   buildTopicDraftFromInbox,
   deriveInboxCandidate,
   makeTopicFilename,

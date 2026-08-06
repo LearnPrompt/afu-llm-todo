@@ -213,13 +213,28 @@
                   </select>
                   <span id="plannerMacosCalendarStatus" class="form-hint">只显示 Calendar.app 里可写入的日历。</span>
                 </label>
-                <label>
-                  飞书目标日历
-                  <select id="plannerLarkCalendarId">
-                    <option value="">主日历(默认)</option>
-                  </select>
-                  <span id="plannerLarkCalendarStatus" class="form-hint">默认同步到主日历。</span>
-                </label>
+                <div class="directory-field voting-pool-settings">
+                  <label for="plannerLarkVotingBaseUrl">团队投票池·飞书多维表格链接</label>
+                  <input
+                    id="plannerLarkVotingBaseUrl"
+                    type="url"
+                    inputmode="url"
+                    placeholder="https://example.feishu.cn/base/...?table=tbl..."
+                  />
+                  <span class="form-hint">填入完整的数据表链接后，已排期选题可二次确认并提交给团队投票。</span>
+                  <details class="field-mapping-details">
+                    <summary>字段映射（有既有表时才需修改）</summary>
+                    <div class="field-mapping-grid">
+                      <label>选题标题<input id="plannerLarkVotingTitleField" type="text" value="选题" /></label>
+                      <label>一句话<input id="plannerLarkVotingSummaryField" type="text" value="一句话" /></label>
+                      <label>标签<input id="plannerLarkVotingTagsField" type="text" value="标签" /></label>
+                      <label>来源链接<input id="plannerLarkVotingSourceUrlField" type="text" value="来源链接" /></label>
+                      <label>排期时间<input id="plannerLarkVotingScheduledAtField" type="text" value="排期时间" /></label>
+                      <label>Afu 路径<input id="plannerLarkVotingAfuPathField" type="text" value="Afu路径" /></label>
+                    </div>
+                    <p class="form-hint">「选题标题」是必填文本字段；标签也建议用文本，避免写入表中尚未建立的选项。其他字段不存在时 Afu 会跳过，不会自动改表结构。票数/投票人由团队在表内维护，Afu 不覆盖。</p>
+                  </details>
+                </div>
                 <div class="directory-field" id="externalCalendarSection">
                   <label>周面板外部日程</label>
                   <span class="form-hint">勾选要在周面板上只读显示的日历；不勾选则跟随上面的同步目标。</span>
@@ -232,7 +247,7 @@
                 <button id="configureVaultDirsBtn" class="mini-btn" type="button" hidden>重新配置目录</button>
               </div>
               <div class="settings-actions">
-                <button class="accent-btn" type="submit">保存目录设置</button>
+                <button class="accent-btn" type="submit">保存工作区设置</button>
               </div>
               <div id="settingsDiagBanner" class="settings-diag-banner" hidden></div>
             </form>
@@ -490,6 +505,28 @@
       </form>
     </dialog>
 
+    <dialog id="larkVotingDialog" class="modal">
+      <form method="dialog" class="modal-card voting-dialog-card" id="larkVotingForm">
+        <div class="modal-head">
+          <div>
+            <p class="panel-tag">团队投票</p>
+            <h3 id="larkVotingTitle">提交到飞书选题池</h3>
+          </div>
+          <button id="larkVotingCloseBtn" class="icon-btn modal-close" type="button" aria-label="先不提交">×</button>
+        </div>
+        <p class="voting-dialog-copy">请用一句话说清楚「这是什么」。提交后，大家可在多维表格里投票和排优先级。</p>
+        <label>
+          一句话解释
+          <textarea id="larkVotingSummary" rows="3" maxlength="500" required></textarea>
+        </label>
+        <p id="larkVotingHint" class="form-hint"></p>
+        <div class="modal-actions">
+          <button id="larkVotingCancelBtn" class="ghost-btn" type="button">先不提交</button>
+          <button id="larkVotingSubmitBtn" class="accent-btn" type="submit">提交到飞书</button>
+        </div>
+      </form>
+    </dialog>
+
     <dialog id="larkAuthDialog" class="modal">
       <div class="modal-card auth-card">
         <div class="modal-head">
@@ -549,6 +586,7 @@
         <div class="topic-actions">
           <button class="mini-btn" data-action="complete" type="button">完成</button>
           <button class="mini-btn" data-action="schedule" type="button">排期</button>
+          <button class="mini-btn" data-action="lark-voting" type="button">提交投票</button>
           <button class="mini-btn" data-action="unschedule" type="button">取消排期</button>
           <button class="mini-btn" data-action="revert-import" type="button">撤回转卡</button>
           <button class="mini-btn" data-action="dispose" type="button">拒绝 / 删除</button>

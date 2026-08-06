@@ -12,6 +12,7 @@ Afu 的网页 UI 使用本地 HTTP API。默认端口是 `4317`。
 
 - `GET /api/topics`
 - `POST /api/topics/schedule`
+- `POST /api/topics/lark-voting`：将已排期选题创建/更新到配置的飞书多维表格
 - `POST /api/topics/unschedule`
 - `POST /api/topics/disposition`
 - `GET /api/diagnostics`
@@ -51,6 +52,8 @@ Wiki Mode：
 - `GET /api/settings`
 - `POST /api/settings`
 - `POST /api/system/select-directory`，仅允许本机调用；在 macOS 打开原生文件夹选择器。独立模式返回绝对路径；Obsidian 模式的子目录会校验位于 Vault 内并返回相对路径
+
+`/api/topics/lark-voting` 要求选题已有 `scheduled_date`，请求体为 `{"path":"...","summary":"一句话解释"}`。写入前会先读取目标表真实字段；无法匹配的可选字段会跳过，表结构不会被自动修改。
 
 飞书日历创建使用：
 

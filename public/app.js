@@ -45,8 +45,10 @@ const state = {
   toast: null,
   workspaceView: "inbox",
   scheduleTarget: null,
+  larkVotingTarget: null,
   disposeTarget: null,
   scheduleSubmitting: false,
+  larkVotingSubmitting: false,
   dailyInboxDialogShown: false,
   dailyInboxDate: "",
   dailyInboxPendingPaths: null,
@@ -120,6 +122,13 @@ const elements = {
   plannerLarkCalendarField: document.querySelector("#plannerLarkCalendarField"),
   plannerLarkCalendarId: document.querySelector("#plannerLarkCalendarId"),
   plannerLarkCalendarStatus: document.querySelector("#plannerLarkCalendarStatus"),
+  plannerLarkVotingBaseUrl: document.querySelector("#plannerLarkVotingBaseUrl"),
+  plannerLarkVotingTitleField: document.querySelector("#plannerLarkVotingTitleField"),
+  plannerLarkVotingSummaryField: document.querySelector("#plannerLarkVotingSummaryField"),
+  plannerLarkVotingTagsField: document.querySelector("#plannerLarkVotingTagsField"),
+  plannerLarkVotingSourceUrlField: document.querySelector("#plannerLarkVotingSourceUrlField"),
+  plannerLarkVotingScheduledAtField: document.querySelector("#plannerLarkVotingScheduledAtField"),
+  plannerLarkVotingAfuPathField: document.querySelector("#plannerLarkVotingAfuPathField"),
   plannerMacosCalendarField: document.querySelector("#plannerMacosCalendarField"),
   plannerMacosCalendarName: document.querySelector("#plannerMacosCalendarName"),
   plannerMacosCalendarStatus: document.querySelector("#plannerMacosCalendarStatus"),
@@ -152,6 +161,14 @@ const elements = {
   scheduleCalendarProvider: document.querySelector("#scheduleCalendarProvider"),
   scheduleCalendarHint: document.querySelector("#scheduleCalendarHint"),
   scheduleSubmitBtn: document.querySelector("#scheduleSubmitBtn"),
+  larkVotingDialog: document.querySelector("#larkVotingDialog"),
+  larkVotingForm: document.querySelector("#larkVotingForm"),
+  larkVotingTitle: document.querySelector("#larkVotingTitle"),
+  larkVotingSummary: document.querySelector("#larkVotingSummary"),
+  larkVotingHint: document.querySelector("#larkVotingHint"),
+  larkVotingSubmitBtn: document.querySelector("#larkVotingSubmitBtn"),
+  larkVotingCancelBtn: document.querySelector("#larkVotingCancelBtn"),
+  larkVotingCloseBtn: document.querySelector("#larkVotingCloseBtn"),
   disposeDialog: document.querySelector("#disposeDialog"),
   disposeForm: document.querySelector("#disposeForm"),
   disposeTitle: document.querySelector("#disposeTitle"),
@@ -377,6 +394,9 @@ function bindEvents() {
   });
 
   elements.scheduleForm.addEventListener("submit", submitSchedule);
+  elements.larkVotingForm?.addEventListener("submit", submitLarkVoting);
+  elements.larkVotingCancelBtn?.addEventListener("click", closeLarkVotingDialog);
+  elements.larkVotingCloseBtn?.addEventListener("click", closeLarkVotingDialog);
   elements.scheduleStart.addEventListener("input", () => { clearActiveScheduleSlot(); renderScheduleDaySidebar(); });
   elements.scheduleEnd.addEventListener("input", () => { clearActiveScheduleSlot(); renderScheduleDaySidebar(); });
   elements.scheduleDate?.addEventListener("input", () => renderScheduleDaySidebar());
@@ -519,6 +539,7 @@ async function loadLarkCalendars() {
   state.larkCalendarsLoading = true;
   state.larkCalendarsError = "";
   renderLarkCalendarSelect();
+  renderLarkVotingSettings();
   try {
     const response = await fetch("/api/lark/calendars");
     const payload = await response.json();
@@ -720,10 +741,23 @@ function renderPlannerSettings() {
   elements.plannerCalendarProvider.value = state.settings.calendarProvider || 'none';
   renderMacOSCalendarSelect();
   renderLarkCalendarSelect();
+  renderLarkVotingSettings();
   elements.plannerSettingsHint.textContent = getSettingsHint(state.settings);
   renderLarkSetupPanel();
   renderVaultLinkBanner();
   renderExternalCalendarPickers();
+}
+
+function renderLarkVotingSettings() {
+  if (!elements.plannerLarkVotingBaseUrl) return;
+  const fieldNames = state.settings?.larkVotingFieldNames || {};
+  elements.plannerLarkVotingBaseUrl.value = state.settings?.larkVotingBaseUrl || "";
+  elements.plannerLarkVotingTitleField.value = fieldNames.title || "选题";
+  elements.plannerLarkVotingSummaryField.value = fieldNames.summary || "一句话";
+  elements.plannerLarkVotingTagsField.value = fieldNames.tags || "标签";
+  elements.plannerLarkVotingSourceUrlField.value = fieldNames.sourceUrl || "来源链接";
+  elements.plannerLarkVotingScheduledAtField.value = fieldNames.scheduledAt || "排期时间";
+  elements.plannerLarkVotingAfuPathField.value = fieldNames.afuPath || "Afu路径";
 }
 
 function renderExternalCalendarPickers() {
@@ -1601,12 +1635,18 @@ function createTopicCard(topic, options = {}) {
 
   const completeBtn = fragment.querySelector('[data-action="complete"]');
   const scheduleBtn = fragment.querySelector('[data-action="schedule"]');
+  const larkVotingBtn = fragment.querySelector('[data-action="lark-voting"]');
   const unscheduleBtn = fragment.querySelector('[data-action="unschedule"]');
   const revertImportBtn = fragment.querySelector('[data-action="revert-import"]');
   const disposeBtn = fragment.querySelector('[data-action="dispose"]');
 
   if (topic.scheduledDate) {
     scheduleBtn.textContent = "重新排期";
+    larkVotingBtn.textContent = topic.larkVotingRecordId ? "更新投票" : "提交投票";
+    larkVotingBtn.title = topic.larkVotingSyncStatus || "提交到飞书团队投票池";
+    larkVotingBtn.addEventListener("click", () => openLarkVotingDialog(topic));
+  } else {
+    larkVotingBtn.remove();
   }
 
   completeBtn.addEventListener("click", () => handleCompleteTopic(topic));
@@ -2009,6 +2049,8 @@ async function submitSchedule(event) {
   elements.scheduleDialog.close();
   if (state.scheduleQueue.length) {
     advanceScheduleQueue();
+  } else if (hasLarkVotingPool()) {
+    openLarkVotingDialog(data.topic);
   }
 }
 
@@ -2017,6 +2059,79 @@ function setScheduleSubmitting(isSubmitting) {
   if (!elements.scheduleSubmitBtn) return;
   elements.scheduleSubmitBtn.disabled = state.scheduleSubmitting;
   elements.scheduleSubmitBtn.textContent = state.scheduleSubmitting ? "保存中…" : "保存排期";
+}
+
+function hasLarkVotingPool() {
+  return Boolean(String(state.settings?.larkVotingBaseUrl || "").trim());
+}
+
+function openLarkVotingDialog(topic) {
+  if (!topic?.scheduledDate) {
+    showToast("选题进入正式排期后才能提交团队投票。");
+    return;
+  }
+  if (!hasLarkVotingPool()) {
+    showToast("请先在工作区设置中填写飞书多维表格链接。", {
+      label: "打开设置",
+      onClick: () => {
+        elements.plannerSettingsDetails.open = true;
+        elements.plannerLarkVotingBaseUrl?.scrollIntoView({ behavior: "smooth", block: "center" });
+        elements.plannerLarkVotingBaseUrl?.focus();
+      },
+    });
+    return;
+  }
+
+  state.larkVotingTarget = topic;
+  setLarkVotingSubmitting(false);
+  const displayTitle = stripTopicPrefix(topic.title);
+  const excerpt = String(topic.excerpt || "").trim();
+  const suggestedSummary = excerpt && excerpt !== "选题判断" && excerpt !== "暂无摘要" ? excerpt : displayTitle;
+  elements.larkVotingTitle.textContent = `${topic.larkVotingRecordId ? "更新" : "提交"}：${displayTitle}`;
+  elements.larkVotingSummary.value = topic.larkVotingSummary || suggestedSummary;
+  elements.larkVotingHint.textContent = topic.larkVotingRecordId
+    ? "这次会更新原有飞书记录，团队已有的投票字段不会被覆盖。"
+    : "只写入已配置的选题字段；票数和投票人由团队在表内维护。";
+  elements.larkVotingDialog.showModal();
+  elements.larkVotingSummary.focus();
+  elements.larkVotingSummary.select();
+}
+
+function closeLarkVotingDialog() {
+  if (state.larkVotingSubmitting) return;
+  elements.larkVotingDialog?.close();
+  state.larkVotingTarget = null;
+}
+
+async function submitLarkVoting(event) {
+  event.preventDefault();
+  if (!state.larkVotingTarget || state.larkVotingSubmitting) return;
+  const summary = elements.larkVotingSummary.value.trim();
+  if (!summary) {
+    elements.larkVotingSummary.focus();
+    return;
+  }
+
+  const target = state.larkVotingTarget;
+  setLarkVotingSubmitting(true);
+  const data = await postAndReload("/api/topics/lark-voting", { path: target.path, summary });
+  setLarkVotingSubmitting(false);
+  if (!data) return;
+
+  elements.larkVotingDialog.close();
+  state.larkVotingTarget = null;
+  const warning = data.warnings?.length ? `；${data.warnings.join("；")}` : "";
+  showToast(`${data.created ? "已提交" : "已更新"}到飞书团队投票池${warning}`, {
+    label: "打开投票表",
+    onClick: () => window.open(data.baseUrl, "_blank", "noopener,noreferrer"),
+  });
+}
+
+function setLarkVotingSubmitting(isSubmitting) {
+  state.larkVotingSubmitting = Boolean(isSubmitting);
+  if (!elements.larkVotingSubmitBtn) return;
+  elements.larkVotingSubmitBtn.disabled = state.larkVotingSubmitting;
+  elements.larkVotingSubmitBtn.textContent = state.larkVotingSubmitting ? "提交中…" : "提交到飞书";
 }
 
 function handleBatchDelete() {
@@ -2797,6 +2912,15 @@ async function submitPlannerSettings(event) {
     larkCalendarName: elements.plannerLarkCalendarId.value.trim()
       ? (elements.plannerLarkCalendarId.selectedOptions?.[0]?.textContent || "").trim()
       : "",
+    larkVotingBaseUrl: elements.plannerLarkVotingBaseUrl?.value.trim() || "",
+    larkVotingFieldNames: {
+      title: elements.plannerLarkVotingTitleField?.value.trim() || "选题",
+      summary: elements.plannerLarkVotingSummaryField?.value.trim() || "一句话",
+      tags: elements.plannerLarkVotingTagsField?.value.trim() || "标签",
+      sourceUrl: elements.plannerLarkVotingSourceUrlField?.value.trim() || "来源链接",
+      scheduledAt: elements.plannerLarkVotingScheduledAtField?.value.trim() || "排期时间",
+      afuPath: elements.plannerLarkVotingAfuPathField?.value.trim() || "Afu路径",
+    },
     ...getPlannerWikiValues(workspaceMode, workspaceMode === 'standalone' ? '' : getDirectoryPickerValue(elements.plannerVaultRoot)),
     dailyCapacity: state.settings?.dailyCapacity || RECOMMENDED_DAILY_CAPACITY,
     scheduleTimeSlots: getScheduleTimeSlots(),
@@ -2832,7 +2956,7 @@ async function submitPlannerSettings(event) {
       };
       state.vaultDirectoryEditing = false;
     }
-    elements.plannerSettingsHint.textContent = '目录设置已保存。';
+    elements.plannerSettingsHint.textContent = '工作区设置已保存。';
     await loadTopics();
     loadExternalEvents();
     await loadSettingsDiagnostics();

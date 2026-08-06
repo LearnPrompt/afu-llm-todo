@@ -25,6 +25,18 @@ const DEFAULT_EXTERNAL_CALENDAR = {
   externalMacosCalendarNames: [],
 };
 
+const DEFAULT_LARK_VOTING = {
+  larkVotingBaseUrl: '',
+  larkVotingFieldNames: {
+    title: '选题',
+    summary: '一句话',
+    tags: '标签',
+    sourceUrl: '来源链接',
+    scheduledAt: '排期时间',
+    afuPath: 'Afu路径',
+  },
+};
+
 const DEFAULT_WIKI = {
   wikiMode: 'off',
 };
@@ -57,6 +69,7 @@ function createDefaultPlannerSettings(projectRoot = process.cwd()) {
     ...DEFAULT_DIRS,
     ...DEFAULT_CALENDAR,
     ...DEFAULT_EXTERNAL_CALENDAR,
+    ...DEFAULT_LARK_VOTING,
     ...DEFAULT_WIKI,
     ...DEFAULT_SCHEDULE,
   };
@@ -162,6 +175,16 @@ function normalizeScheduleTimeSlots(value, fallback = DEFAULT_SCHEDULE.scheduleT
   return slots.length ? slots.slice(0, 8) : fallback;
 }
 
+function normalizeLarkVotingFieldNames(value) {
+  const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return Object.fromEntries(
+    Object.entries(DEFAULT_LARK_VOTING.larkVotingFieldNames).map(([key, fallback]) => [
+      key,
+      String(input[key] || fallback).trim() || fallback,
+    ]),
+  );
+}
+
 function normalizePlannerSettings(settings = {}, projectRoot = process.cwd()) {
   const defaults = createDefaultPlannerSettings(projectRoot);
   const workspaceMode = normalizeWorkspaceMode(settings.workspaceMode);
@@ -180,6 +203,8 @@ function normalizePlannerSettings(settings = {}, projectRoot = process.cwd()) {
     larkCalendarName: String(settings.larkCalendarName || defaults.larkCalendarName).trim(),
     externalLarkCalendarIds: normalizeStringListField(settings.externalLarkCalendarIds),
     externalMacosCalendarNames: normalizeStringListField(settings.externalMacosCalendarNames),
+    larkVotingBaseUrl: String(settings.larkVotingBaseUrl || defaults.larkVotingBaseUrl).trim(),
+    larkVotingFieldNames: normalizeLarkVotingFieldNames(settings.larkVotingFieldNames),
     wikiMode: normalizeWikiMode(settings.wikiMode, defaults.wikiMode),
     wikiDir: normalizeRelativeDir(settings.wikiDir, defaults.wikiDir),
     wikiIndexPath: normalizeRelativeDir(settings.wikiIndexPath, defaults.wikiIndexPath),

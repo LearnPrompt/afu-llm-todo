@@ -3302,6 +3302,10 @@ function findNestedValue(payload, keys) {
   for (const key of keys) {
     const value = payload[key];
     if (typeof value === "string" && value.trim()) return value.trim();
+    if (Array.isArray(value)) {
+      const firstString = value.find((item) => typeof item === "string" && item.trim());
+      if (firstString) return firstString.trim();
+    }
   }
   for (const value of Object.values(payload)) {
     const found = findNestedValue(value, keys);
@@ -3383,7 +3387,7 @@ function formatLarkVotingCellValue(value, field, kind) {
 }
 
 function extractLarkRecordId(payload) {
-  return findNestedValue(payload, ["record_id", "recordId"]);
+  return findNestedValue(payload, ["record_id", "recordId", "record_id_list", "recordIdList"]);
 }
 
 async function execJson(command, args) {

@@ -24,7 +24,11 @@ function buildVotingStub() {
         ],
       }),
       'base +record-upsert --base-token': JSON.stringify({
-        record: { record_id: 'rec_vote_1' },
+        ok: true,
+        data: {
+          created: true,
+          record: { record_id_list: ['rec_vote_1'] },
+        },
       }),
     },
   });

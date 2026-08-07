@@ -28,6 +28,8 @@ test('createDefaultPlannerSettings exposes editable relative directories for fir
     sourceUrl: '来源链接',
     scheduledAt: '排期时间',
     afuPath: 'Afu路径',
+    documentUrl: '飞书文档',
+    votingDate: '入池日期',
   });
   assert.equal(settings.wikiMode, 'off');
   assert.equal(settings.wikiDir, '30_整理Wiki');
@@ -56,6 +58,8 @@ test('normalizePlannerSettings trims user input and keeps relative directory lay
       title: ' 标题 ',
       summary: ' 大白话 ',
       tags: '',
+      documentUrl: ' 选题原文 ',
+      votingDate: ' 投票日 ',
     },
     wikiMode: 'agent',
     wikiDir: ' /研究/内容Wiki/ ',
@@ -84,6 +88,8 @@ test('normalizePlannerSettings trims user input and keeps relative directory lay
     sourceUrl: '来源链接',
     scheduledAt: '排期时间',
     afuPath: 'Afu路径',
+    documentUrl: '选题原文',
+    votingDate: '投票日',
   });
   assert.equal(normalized.wikiMode, 'agent');
   assert.equal(normalized.wikiDir, '研究/内容Wiki');

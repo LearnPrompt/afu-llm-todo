@@ -90,6 +90,9 @@ const FRONTMATTER_ORDER = [
   "lark_event_id",
   "lark_voting_table_id",
   "lark_voting_record_id",
+  "lark_voting_doc_id",
+  "lark_voting_doc_url",
+  "lark_voting_date",
   "lark_voting_summary",
   "lark_voting_sync_status",
   "lark_voting_synced_at",
@@ -1622,6 +1625,9 @@ async function readTopic(filePath) {
     larkCalendarId: normalized.lark_calendar_id || "",
     larkVotingTableId: normalized.lark_voting_table_id || "",
     larkVotingRecordId: normalized.lark_voting_record_id || "",
+    larkVotingDocId: normalized.lark_voting_doc_id || "",
+    larkVotingDocUrl: normalized.lark_voting_doc_url || "",
+    larkVotingDate: normalized.lark_voting_date || "",
     larkVotingSummary: normalized.lark_voting_summary || "",
     larkVotingSyncStatus: normalized.lark_voting_sync_status || "",
     larkVotingSyncedAt: normalized.lark_voting_synced_at || "",
@@ -1759,19 +1765,45 @@ async function submitTopicToLarkVoting(payload) {
     throw badRequest("一句话解释不能超过 500 个字");
   }
   const fallbackExcerpt = extractExcerpt(source.body, title, topic);
+  const displayTitle = normalizeDisplayTitle(title);
   const summary = requestedSummary
     || topic.lark_voting_summary
-    || (/^选题判断$/u.test(fallbackExcerpt) ? normalizeDisplayTitle(title) : fallbackExcerpt)
-    || normalizeDisplayTitle(title);
+    || (/^选题判断$/u.test(fallbackExcerpt) ? displayTitle : fallbackExcerpt)
+    || displayTitle;
+  const votingDate = optionalString(topic.lark_voting_date) || localDateString();
+  const documentContent = buildLarkVotingDocumentContent({
+    title: displayTitle,
+    summary,
+    topic,
+    body: source.body,
+    afuPath: source.relPath,
+  });
+  const document = await syncLarkVotingDocument({
+    documentId: topic.lark_voting_doc_id,
+    documentUrl: topic.lark_voting_doc_url,
+    title: `选题｜${displayTitle}`,
+    content: documentContent,
+  });
+
+  topic.lark_voting_doc_id = document.documentId;
+  topic.lark_voting_doc_url = document.documentUrl;
+  topic.lark_voting_date = votingDate;
+  topic.lark_voting_summary = summary;
+  topic.lark_voting_sync_status = `飞书文档已${document.created ? "创建" : "更新"}，投票池写入待重试`;
+  topic.updated = localDateString();
+  await writeTopicFile(filePath, topic, source.body);
+
   const { fields, warnings } = buildLarkVotingFields({
     availableFields,
     fieldNames: settings.larkVotingFieldNames,
-    title: normalizeDisplayTitle(title),
+    title: displayTitle,
     summary,
     tags: [...topic.target_forms, ...topic.platforms, ...topic.tags],
     sourceUrl: topic.source_url,
     scheduledAt: `${topic.scheduled_date} ${topic.scheduled_start || "00:00"}:00`,
     afuPath: source.relPath,
+    documentUrl: document.documentUrl,
+    votingDate: `${votingDate} 00:00:00`,
   });
 
   const existingRecordId = optionalString(topic.lark_voting_record_id);
@@ -1792,24 +1824,26 @@ async function submitTopicToLarkVoting(payload) {
 
   topic.lark_voting_table_id = coordinates.tableId;
   topic.lark_voting_record_id = recordId;
-  topic.lark_voting_summary = summary;
   topic.lark_voting_sync_status = warnings.length ? `已提交（${warnings.join("；")}）` : "已提交";
   topic.lark_voting_synced_at = new Date().toISOString();
-  topic.updated = todayString();
+  topic.updated = localDateString();
   await writeTopicFile(filePath, topic, source.body);
   await appendPlannerLog(existingRecordId ? "lark-voting-update" : "lark-voting-create", title, {
     path: source.relPath,
     tableId: coordinates.tableId,
     recordId,
+    documentId: document.documentId,
     warningCount: String(warnings.length),
   });
 
   return {
     ok: true,
     created: !existingRecordId,
+    documentCreated: document.created,
     recordId,
     tableId: coordinates.tableId,
     baseUrl,
+    documentUrl: document.documentUrl,
     warnings,
     topic: await readTopic(filePath),
   };
@@ -2430,6 +2464,9 @@ function normalizeTopic(frontmatter, title, relPath) {
   normalized.lark_event_id = optionalString(normalized.lark_event_id);
   normalized.lark_voting_table_id = optionalString(normalized.lark_voting_table_id);
   normalized.lark_voting_record_id = optionalString(normalized.lark_voting_record_id);
+  normalized.lark_voting_doc_id = optionalString(normalized.lark_voting_doc_id);
+  normalized.lark_voting_doc_url = optionalString(normalized.lark_voting_doc_url);
+  normalized.lark_voting_date = optionalString(normalized.lark_voting_date);
   normalized.lark_voting_summary = optionalString(normalized.lark_voting_summary);
   normalized.lark_voting_sync_status = optionalString(normalized.lark_voting_sync_status);
   normalized.lark_voting_synced_at = optionalString(normalized.lark_voting_synced_at);
@@ -3332,7 +3369,18 @@ function extractLarkBaseFields(payload) {
   })).filter((field) => field.name);
 }
 
-function buildLarkVotingFields({ availableFields, fieldNames, title, summary, tags, sourceUrl, scheduledAt, afuPath }) {
+function buildLarkVotingFields({
+  availableFields,
+  fieldNames,
+  title,
+  summary,
+  tags,
+  sourceUrl,
+  scheduledAt,
+  afuPath,
+  documentUrl,
+  votingDate,
+}) {
   const byName = new Map(availableFields.map((field) => [field.name, field]));
   const titleFieldName = optionalString(fieldNames?.title) || "选题";
   const titleField = byName.get(titleFieldName);
@@ -3351,6 +3399,8 @@ function buildLarkVotingFields({ availableFields, fieldNames, title, summary, ta
     { key: "sourceUrl", value: sourceUrl, kind: "url" },
     { key: "scheduledAt", value: scheduledAt, kind: "datetime" },
     { key: "afuPath", value: afuPath, kind: "text" },
+    { key: "documentUrl", value: documentUrl, kind: "url" },
+    { key: "votingDate", value: votingDate, kind: "datetime" },
   ];
 
   for (const candidate of candidates) {
@@ -3386,12 +3436,98 @@ function formatLarkVotingCellValue(value, field, kind) {
   return value;
 }
 
+function buildLarkVotingDocumentContent({ title, summary, topic, body, afuPath }) {
+  const documentBody = stripLeadingDuplicateMarkdownHeading(body, title).trim();
+  const schedule = [
+    topic.scheduled_date,
+    topic.scheduled_start && topic.scheduled_end
+      ? `${topic.scheduled_start}–${topic.scheduled_end}`
+      : topic.scheduled_start,
+  ].filter(Boolean).join(" ");
+  return [
+    "> 本文档由 Afu 从 Markdown 自动同步。请在 Afu / Obsidian 修改原文，团队在多维表格中投票。",
+    "",
+    `**一句话：** ${escapeMarkdownInline(summary)}`,
+    `**排期：** ${escapeMarkdownInline(schedule)}`,
+    `**Afu 路径：** \`${escapeMarkdownCode(afuPath)}\``,
+    "",
+    "---",
+    "",
+    documentBody || "_暂无正文_",
+  ].join("\n");
+}
+
+function stripLeadingDuplicateMarkdownHeading(body, title) {
+  const lines = String(body || "").replace(/\r\n/g, "\n").split("\n");
+  const firstContentIndex = lines.findIndex((line) => line.trim());
+  if (firstContentIndex < 0) return "";
+  const heading = lines[firstContentIndex].match(/^#\s+(.+?)\s*$/u);
+  if (!heading || normalizeDisplayTitle(heading[1]) !== normalizeDisplayTitle(title)) {
+    return lines.join("\n");
+  }
+  lines.splice(firstContentIndex, 1);
+  while (lines[firstContentIndex] !== undefined && !lines[firstContentIndex].trim()) {
+    lines.splice(firstContentIndex, 1);
+  }
+  return lines.join("\n");
+}
+
+function escapeMarkdownInline(value) {
+  return String(value || "")
+    .replace(/\r?\n/g, " ")
+    .replace(/\\/g, "\\\\")
+    .replace(/([`*_\[\]$~])/g, "\\$1")
+    .replace(/</g, "\\<")
+    .trim();
+}
+
+function escapeMarkdownCode(value) {
+  return String(value || "").replace(/`/g, "\\`").replace(/\r?\n/g, " ");
+}
+
+async function syncLarkVotingDocument({ documentId, documentUrl, title, content }) {
+  const existingDocumentId = optionalString(documentId);
+  const existingDocumentUrl = optionalString(documentUrl);
+  if (existingDocumentId) {
+    if (!existingDocumentUrl) {
+      throw new Error("选题已记录飞书文档 ID，但缺少文档链接；请修复 frontmatter 后重试");
+    }
+    await execJson("lark-cli", [
+      "docs", "+update", "--doc", existingDocumentId,
+      "--command", "overwrite", "--doc-format", "markdown", "--content", "-",
+      "--as", "user", "--format", "json",
+    ], { input: content });
+    return {
+      created: false,
+      documentId: existingDocumentId,
+      documentUrl: existingDocumentUrl,
+    };
+  }
+
+  const payload = await execJson("lark-cli", [
+    "docs", "+create", "--doc-format", "markdown", "--title", title.slice(0, 500),
+    "--content", "-", "--as", "user", "--format", "json",
+  ], { input: content });
+  const document = extractLarkDocumentCoordinates(payload);
+  if (!document.documentId || !document.documentUrl) {
+    throw new Error("飞书已返回文档创建成功响应，但缺少文档 ID 或链接");
+  }
+  return { created: true, ...document };
+}
+
+function extractLarkDocumentCoordinates(payload) {
+  return {
+    documentId: findNestedValue(payload, ["document_id", "documentId", "doc_token", "docToken"]),
+    documentUrl: findNestedValue(payload, ["document_url", "documentUrl", "url"]),
+  };
+}
+
 function extractLarkRecordId(payload) {
   return findNestedValue(payload, ["record_id", "recordId", "record_id_list", "recordIdList"]);
 }
 
-async function execJson(command, args) {
-  const stdout = await execText(command, args);
+async function execJson(command, args, options = {}) {
+  const stdout = await execText(command, args, options);
   const trimmed = stdout.trim();
   if (!trimmed) return {};
   return JSON.parse(trimmed);
@@ -3402,7 +3538,7 @@ function execText(command, args, options = {}) {
     try {
       const { vaultRoot } = await getPlannerPaths();
       const executable = await resolveCommand(command);
-      execFile(
+      const child = execFile(
         executable,
         args,
         {
@@ -3422,6 +3558,12 @@ function execText(command, args, options = {}) {
           resolve(stdout);
         },
       );
+      if (Object.hasOwn(options, "input")) {
+        child.stdin.on("error", (error) => {
+          if (error.code !== "EPIPE") console.warn("Failed to write command stdin:", error.message);
+        });
+        child.stdin.end(String(options.input ?? ""));
+      }
     } catch (error) {
       reject(error);
     }

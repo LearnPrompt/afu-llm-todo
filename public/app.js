@@ -129,6 +129,8 @@ const elements = {
   plannerLarkVotingSourceUrlField: document.querySelector("#plannerLarkVotingSourceUrlField"),
   plannerLarkVotingScheduledAtField: document.querySelector("#plannerLarkVotingScheduledAtField"),
   plannerLarkVotingAfuPathField: document.querySelector("#plannerLarkVotingAfuPathField"),
+  plannerLarkVotingDocumentUrlField: document.querySelector("#plannerLarkVotingDocumentUrlField"),
+  plannerLarkVotingDateField: document.querySelector("#plannerLarkVotingDateField"),
   plannerMacosCalendarField: document.querySelector("#plannerMacosCalendarField"),
   plannerMacosCalendarName: document.querySelector("#plannerMacosCalendarName"),
   plannerMacosCalendarStatus: document.querySelector("#plannerMacosCalendarStatus"),
@@ -758,6 +760,8 @@ function renderLarkVotingSettings() {
   elements.plannerLarkVotingSourceUrlField.value = fieldNames.sourceUrl || "来源链接";
   elements.plannerLarkVotingScheduledAtField.value = fieldNames.scheduledAt || "排期时间";
   elements.plannerLarkVotingAfuPathField.value = fieldNames.afuPath || "Afu路径";
+  elements.plannerLarkVotingDocumentUrlField.value = fieldNames.documentUrl || "飞书文档";
+  elements.plannerLarkVotingDateField.value = fieldNames.votingDate || "入池日期";
 }
 
 function renderExternalCalendarPickers() {
@@ -1642,7 +1646,7 @@ function createTopicCard(topic, options = {}) {
 
   if (topic.scheduledDate) {
     scheduleBtn.textContent = "重新排期";
-    larkVotingBtn.textContent = topic.larkVotingRecordId ? "更新投票" : "提交投票";
+    larkVotingBtn.textContent = topic.larkVotingRecordId ? "更新文档与投票" : "生成文档并投票";
     larkVotingBtn.title = topic.larkVotingSyncStatus || "提交到飞书团队投票池";
     larkVotingBtn.addEventListener("click", () => openLarkVotingDialog(topic));
   } else {
@@ -2090,8 +2094,8 @@ function openLarkVotingDialog(topic) {
   elements.larkVotingTitle.textContent = `${topic.larkVotingRecordId ? "更新" : "提交"}：${displayTitle}`;
   elements.larkVotingSummary.value = topic.larkVotingSummary || suggestedSummary;
   elements.larkVotingHint.textContent = topic.larkVotingRecordId
-    ? "这次会更新原有飞书记录，团队已有的投票字段不会被覆盖。"
-    : "只写入已配置的选题字段；票数和投票人由团队在表内维护。";
+    ? "这次会更新原有飞书文档和记录，团队已有的投票字段不会被覆盖。"
+    : "Afu 会创建飞书文档并写入当天投票池；票数和投票人由团队在表内维护。";
   elements.larkVotingDialog.showModal();
   elements.larkVotingSummary.focus();
   elements.larkVotingSummary.select();
@@ -2121,7 +2125,7 @@ async function submitLarkVoting(event) {
   elements.larkVotingDialog.close();
   state.larkVotingTarget = null;
   const warning = data.warnings?.length ? `；${data.warnings.join("；")}` : "";
-  showToast(`${data.created ? "已提交" : "已更新"}到飞书团队投票池${warning}`, {
+  showToast(`${data.created ? "已生成文档并提交" : "已更新文档和投票记录"}${warning}`, {
     label: "打开投票表",
     onClick: () => window.open(data.baseUrl, "_blank", "noopener,noreferrer"),
   });
@@ -2131,7 +2135,9 @@ function setLarkVotingSubmitting(isSubmitting) {
   state.larkVotingSubmitting = Boolean(isSubmitting);
   if (!elements.larkVotingSubmitBtn) return;
   elements.larkVotingSubmitBtn.disabled = state.larkVotingSubmitting;
-  elements.larkVotingSubmitBtn.textContent = state.larkVotingSubmitting ? "提交中…" : "提交到飞书";
+  elements.larkVotingSubmitBtn.textContent = state.larkVotingSubmitting
+    ? "同步中…"
+    : (state.larkVotingTarget?.larkVotingDocUrl ? "更新文档与投票" : "生成文档并提交");
 }
 
 function handleBatchDelete() {
@@ -2920,6 +2926,8 @@ async function submitPlannerSettings(event) {
       sourceUrl: elements.plannerLarkVotingSourceUrlField?.value.trim() || "来源链接",
       scheduledAt: elements.plannerLarkVotingScheduledAtField?.value.trim() || "排期时间",
       afuPath: elements.plannerLarkVotingAfuPathField?.value.trim() || "Afu路径",
+      documentUrl: elements.plannerLarkVotingDocumentUrlField?.value.trim() || "飞书文档",
+      votingDate: elements.plannerLarkVotingDateField?.value.trim() || "入池日期",
     },
     ...getPlannerWikiValues(workspaceMode, workspaceMode === 'standalone' ? '' : getDirectoryPickerValue(elements.plannerVaultRoot)),
     dailyCapacity: state.settings?.dailyCapacity || RECOMMENDED_DAILY_CAPACITY,

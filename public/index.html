@@ -231,8 +231,10 @@
                       <label>来源链接<input id="plannerLarkVotingSourceUrlField" type="text" value="来源链接" /></label>
                       <label>排期时间<input id="plannerLarkVotingScheduledAtField" type="text" value="排期时间" /></label>
                       <label>Afu 路径<input id="plannerLarkVotingAfuPathField" type="text" value="Afu路径" /></label>
+                      <label>飞书文档<input id="plannerLarkVotingDocumentUrlField" type="text" value="飞书文档" /></label>
+                      <label>入池日期<input id="plannerLarkVotingDateField" type="text" value="入池日期" /></label>
                     </div>
-                    <p class="form-hint">「选题标题」是必填文本字段；标签也建议用文本，避免写入表中尚未建立的选项。其他字段不存在时 Afu 会跳过，不会自动改表结构。票数/投票人由团队在表内维护，Afu 不覆盖。</p>
+                    <p class="form-hint">「选题标题」是必填文本字段；飞书文档建议使用 URL 字段，入池日期使用日期字段。其他字段不存在时 Afu 会跳过，不会自动改表结构。票数/投票人由团队在表内维护，Afu 不覆盖。</p>
                   </details>
                 </div>
                 <div class="directory-field" id="externalCalendarSection">
@@ -514,7 +516,7 @@
           </div>
           <button id="larkVotingCloseBtn" class="icon-btn modal-close" type="button" aria-label="先不提交">×</button>
         </div>
-        <p class="voting-dialog-copy">请用一句话说清楚「这是什么」。提交后，大家可在多维表格里投票和排优先级。</p>
+        <p class="voting-dialog-copy">请用一句话说清楚「这是什么」。提交后，Afu 会把完整 Markdown 同步为飞书文档，再加入当天投票池。</p>
         <label>
           一句话解释
           <textarea id="larkVotingSummary" rows="3" maxlength="500" required></textarea>
@@ -522,7 +524,7 @@
         <p id="larkVotingHint" class="form-hint"></p>
         <div class="modal-actions">
           <button id="larkVotingCancelBtn" class="ghost-btn" type="button">先不提交</button>
-          <button id="larkVotingSubmitBtn" class="accent-btn" type="submit">提交到飞书</button>
+          <button id="larkVotingSubmitBtn" class="accent-btn" type="submit">生成文档并提交</button>
         </div>
       </form>
     </dialog>

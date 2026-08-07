@@ -53,7 +53,7 @@ Wiki Mode：
 - `POST /api/settings`
 - `POST /api/system/select-directory`，仅允许本机调用；在 macOS 打开原生文件夹选择器。独立模式返回绝对路径；Obsidian 模式的子目录会校验位于 Vault 内并返回相对路径
 
-`/api/topics/lark-voting` 要求选题已有 `scheduled_date`，请求体为 `{"path":"...","summary":"一句话解释"}`。写入前会先读取目标表真实字段；无法匹配的可选字段会跳过，表结构不会被自动修改。
+`/api/topics/lark-voting` 要求选题已有 `scheduled_date`，请求体为 `{"path":"...","summary":"一句话解释"}`。首次提交会把完整 Markdown 创建为飞书文档，再把文档链接、入池日期和选题字段写入多维表；文档、表格记录和入池日期的 ID/链接会写回 frontmatter。重复提交会覆盖同一篇飞书文档并更新同一条表格记录，不会覆盖团队维护的投票人和票数。写入前会读取目标表真实字段；无法匹配的可选字段会跳过，表结构不会被自动修改。
 
 飞书日历创建使用：
 

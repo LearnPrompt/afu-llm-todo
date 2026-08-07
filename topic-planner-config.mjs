@@ -34,6 +34,8 @@ const DEFAULT_LARK_VOTING = {
     sourceUrl: '来源链接',
     scheduledAt: '排期时间',
     afuPath: 'Afu路径',
+    documentUrl: '飞书文档',
+    votingDate: '入池日期',
   },
 };
 

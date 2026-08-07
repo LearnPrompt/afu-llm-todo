@@ -2587,6 +2587,8 @@ async function refetchInboxCandidate(candidate, button, card) {
       button.textContent = originalText;
       return;
     }
+    state.inboxCandidateEdits.delete(candidate.sourcePath);
+    persistInboxCandidateEdits();
     await loadTopics();
     showToast(data.message || '抓取完成');
   } catch (error) {

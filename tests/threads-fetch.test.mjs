@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  deriveThreadsInboxTitle,
   fetchThreadsThread,
   findRecoverableSocialUrl,
   getInstagramMediaReference,
@@ -152,16 +153,26 @@ test('fetchThreadsThread retries a share shell with the alternate crawler identi
 
 test('upsertThreadsMarkdownSection is idempotent and refreshes generated content', () => {
   const thread = parseThreadsThreadHtml(threadsHtml(), 'https://www.threads.com/@author/post/ROOT123');
-  const first = upsertThreadsMarkdownSection('---\ntitle: 原文\n---\n\n原始内容', thread, '2026-08-05');
+  const first = upsertThreadsMarkdownSection('---\ntitle: 原文\n---\n\n旧同步正文', thread, '2026-08-05');
+  assert.match(first, /^---\ntitle: 原文\n---\n\n<!-- afu-threads:ROOT123:start -->\n主帖正文/);
   assert.match(first, /连续正文：3 条/);
   assert.match(first, /作者连续回复二/);
+  assert.match(first, /## 原始同步内容\n\n旧同步正文/);
   const refreshed = upsertThreadsMarkdownSection(first, {
     ...thread,
     posts: thread.posts.slice(0, 2),
   }, '2026-08-06');
   assert.equal((refreshed.match(/afu-threads:ROOT123:start/g) || []).length, 1);
-  assert.match(refreshed, /Threads 抓取日期 2026-08-06/);
+  assert.match(refreshed, /Threads 抓取日期：2026-08-06/);
   assert.doesNotMatch(refreshed, /作者连续回复二/);
+  assert.equal((refreshed.match(/## 原始同步内容/g) || []).length, 1);
+  assert.equal((refreshed.match(/旧同步正文/g) || []).length, 1);
+});
+
+test('deriveThreadsInboxTitle uses the fetched root post instead of the old filename', () => {
+  const thread = parseThreadsThreadHtml(threadsHtml(), 'https://www.threads.com/@author/post/ROOT123');
+  assert.equal(deriveThreadsInboxTitle(thread), '主帖正文');
+  assert.match(deriveThreadsInboxTitle({ ...thread, posts: [{ ...thread.posts[0], text: '很长'.repeat(40) }] }), /…$/);
 });
 
 test('upsertInstagramMarkdownSection upgrades the legacy append and stays idempotent', () => {

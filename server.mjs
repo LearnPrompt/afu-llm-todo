@@ -37,6 +37,7 @@ import {
   savePlannerSettings,
 } from "./topic-planner-config.mjs";
 import {
+  deriveThreadsInboxTitle,
   fetchThreadsThread,
   findRecoverableSocialUrl,
   isInstagramUrl,
@@ -1449,7 +1450,9 @@ async function refetchThreadsInboxCandidate({ absolutePath, frontmatter, raw, re
   try {
     const thread = await fetchThreadsThread(sourceUrl);
     const date = new Date().toISOString().slice(0, 10);
+    const title = deriveThreadsInboxTitle(thread);
     let updatedRaw = upsertThreadsMarkdownSection(raw, thread, date);
+    updatedRaw = patchFrontmatterField(updatedRaw, "title", JSON.stringify(title));
     updatedRaw = patchFrontmatterField(updatedRaw, "url", thread.canonicalUrl);
     if (!optionalString(frontmatter.author) || optionalString(frontmatter.author).toLowerCase() === "unknown") {
       updatedRaw = patchFrontmatterField(updatedRaw, "author", thread.author);
@@ -1463,6 +1466,7 @@ async function refetchThreadsInboxCandidate({ absolutePath, frontmatter, raw, re
         ? `已抓取 Threads 主帖和 ${replyCount} 条作者连续回复`
         : "已抓取 Threads 主帖",
       sourcePath: relPath,
+      title,
       url: thread.canonicalUrl,
       postCount: thread.posts.length,
     };

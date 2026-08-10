@@ -1400,6 +1400,46 @@ textarea.inbox-inline-editor {
   justify-content: flex-start;
 }
 
+.topic-more-actions {
+  position: relative;
+}
+
+.topic-more-actions > summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.topic-more-actions > summary::-webkit-details-marker {
+  display: none;
+}
+
+.topic-more-actions[open] > summary {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.topic-more-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 12;
+  display: grid;
+  min-width: 148px;
+  padding: 8px;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper);
+  box-shadow: 0 14px 32px rgba(49, 36, 24, 0.16);
+}
+
+.topic-more-menu .mini-btn {
+  width: 100%;
+  justify-content: flex-start;
+  white-space: nowrap;
+}
+
 .topic-priority,
 .topic-stage,
 .topic-sync,

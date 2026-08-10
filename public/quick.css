@@ -41,7 +41,8 @@ body {
 }
 
 button,
-input {
+input,
+textarea {
   font: inherit;
 }
 
@@ -459,6 +460,21 @@ input:focus-visible {
   font-weight: 700;
 }
 
+.card-vote-action {
+  position: relative;
+  z-index: 1;
+  width: fit-content;
+  min-height: 38px;
+  margin-top: 14px;
+  padding: 0 13px;
+  border: 1px solid rgba(61, 115, 85, 0.24);
+  border-radius: 999px;
+  color: var(--sage);
+  background: rgba(61, 115, 85, 0.08);
+  font-size: 11px;
+  font-weight: 800;
+}
+
 .card-footer {
   position: relative;
   z-index: 1;
@@ -798,7 +814,8 @@ body.is-workspace-view .action-dock {
 }
 
 .secondary-button,
-.confirm-reject {
+.confirm-reject,
+.confirm-vote {
   min-height: 52px;
   padding: 0 18px;
   border-radius: 16px;
@@ -1153,6 +1170,38 @@ body.is-workspace-view .action-dock {
 .confirm-reject {
   color: white;
   background: linear-gradient(145deg, #a8442b, #85331f);
+}
+
+.confirm-vote {
+  color: white;
+  background: linear-gradient(145deg, #4f7f63, #315e47);
+}
+
+.vote-dialog-copy {
+  margin: -7px 0 16px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.vote-summary-field {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.vote-summary-field textarea {
+  width: 100%;
+  min-height: 110px;
+  padding: 13px 14px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--ink);
+  background: #fff;
+  line-height: 1.55;
 }
 
 .toast {

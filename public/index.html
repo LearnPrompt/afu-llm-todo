@@ -75,7 +75,7 @@
       </section>
 
       <section class="config-section">
-        <details id="plannerSettingsDetails" class="planner-settings-details" open>
+        <details id="plannerSettingsDetails" class="planner-settings-details">
             <summary class="settings-summary">
               <span class="settings-summary-label">工作区设置</span>
               <span class="settings-summary-workspace">
@@ -221,7 +221,7 @@
                     inputmode="url"
                     placeholder="https://example.feishu.cn/base/...?table=tbl..."
                   />
-                  <span class="form-hint">填入完整的数据表链接后，已排期选题可二次确认并提交给团队投票。</span>
+                  <span class="form-hint">填入完整的数据表链接后，选题可先二次确认并提交团队投票，再决定排期。</span>
                   <details class="field-mapping-details">
                     <summary>字段映射（有既有表时才需修改）</summary>
                     <div class="field-mapping-grid">
@@ -262,6 +262,7 @@
           <select id="stageFilter">
             <option value="">全部阶段</option>
             <option value="待排期">待排期</option>
+            <option value="待投票">待投票</option>
             <option value="去重中">去重中</option>
             <option value="已排期">已排期</option>
             <option value="制作中">制作中</option>
@@ -344,9 +345,9 @@
             <div class="panel-head">
               <div>
                 <p class="panel-tag">阿福排期池</p>
-                <h2>待排期选题</h2>
+                <h2>待判断与团队投票</h2>
               </div>
-              <span id="backlogHint">筛选后挑一张，拖到右侧周历。</span>
+              <span id="backlogHint">可先送团队投票，也可直接拖到右侧周历。</span>
             </div>
             <div class="backlog-controls">
               <div class="pager-group">
@@ -589,9 +590,14 @@
           <button class="mini-btn" data-action="complete" type="button">完成</button>
           <button class="mini-btn" data-action="schedule" type="button">排期</button>
           <button class="mini-btn" data-action="lark-voting" type="button">提交投票</button>
-          <button class="mini-btn" data-action="unschedule" type="button">取消排期</button>
-          <button class="mini-btn" data-action="revert-import" type="button">撤回转卡</button>
-          <button class="mini-btn" data-action="dispose" type="button">拒绝 / 删除</button>
+          <details class="topic-more-actions">
+            <summary class="mini-btn">更多</summary>
+            <div class="topic-more-menu">
+              <button class="mini-btn" data-action="unschedule" type="button">取消排期</button>
+              <button class="mini-btn" data-action="revert-import" type="button">撤回转卡</button>
+              <button class="mini-btn" data-action="dispose" type="button">拒绝 / 删除</button>
+            </div>
+          </details>
         </div>
       </article>
     </template>

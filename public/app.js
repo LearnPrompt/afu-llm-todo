@@ -445,6 +445,9 @@ async function loadTopics() {
     state.inboxSummary = payload.inboxSummary || null;
     state.settings = payload.settings || null;
     state.hasSavedConfig = Boolean(payload.hasSavedConfig);
+    if (!state.hasSavedConfig && elements.plannerSettingsDetails) {
+      elements.plannerSettingsDetails.open = true;
+    }
     state.configPath = payload.configPath || "";
     state.lark = payload.lark || null;
     await loadCompletedWeek();
@@ -978,15 +981,15 @@ function renderBacklog() {
   elements.backlogHint.textContent = suggestionsActive
     ? "AI 建议分组中:已临时显示全部卡片,组号颜色和下方建议一一对应。"
     : state.recentTopicPaths.length
-      ? "最近转入的卡片已置顶；确认后再拖进日历。"
-      : "筛选后挑一张，拖到右侧周历。";
+      ? "最近转入的卡片已置顶；可先送团队投票，也可直接排期。"
+      : "可先送团队投票，也可直接拖到右侧周历。";
 
   elements.backlogList.innerHTML = "";
 
   if (topics.length === 0) {
     elements.backlogList.innerHTML = `
       <div class="empty-state">
-        <strong>当前筛选下没有待排期选题</strong>
+        <strong>当前筛选下没有匹配选题</strong>
         <span>搜索：${escapeHtml(state.search || '无')} · 阶段：${escapeHtml(state.stageFilter || '全部阶段')}</span>
         <button id="clearBacklogFilterBtn" class="mini-btn" type="button">清空筛选</button>
       </div>`;
@@ -1640,17 +1643,21 @@ function createTopicCard(topic, options = {}) {
   const completeBtn = fragment.querySelector('[data-action="complete"]');
   const scheduleBtn = fragment.querySelector('[data-action="schedule"]');
   const larkVotingBtn = fragment.querySelector('[data-action="lark-voting"]');
+  const moreActions = fragment.querySelector(".topic-more-actions");
+  const moreMenu = fragment.querySelector(".topic-more-menu");
   const unscheduleBtn = fragment.querySelector('[data-action="unschedule"]');
   const revertImportBtn = fragment.querySelector('[data-action="revert-import"]');
   const disposeBtn = fragment.querySelector('[data-action="dispose"]');
 
+  larkVotingBtn.textContent = topic.larkVotingRecordId ? "更新投票" : "送团队投票";
+  larkVotingBtn.title = topic.larkVotingSyncStatus || "提交到飞书团队投票池";
+  larkVotingBtn.addEventListener("click", () => openLarkVotingDialog(topic));
+
   if (topic.scheduledDate) {
     scheduleBtn.textContent = "重新排期";
-    larkVotingBtn.textContent = topic.larkVotingRecordId ? "更新文档与投票" : "生成文档并投票";
-    larkVotingBtn.title = topic.larkVotingSyncStatus || "提交到飞书团队投票池";
-    larkVotingBtn.addEventListener("click", () => openLarkVotingDialog(topic));
+    moreMenu.prepend(larkVotingBtn);
   } else {
-    larkVotingBtn.remove();
+    completeBtn.remove();
   }
 
   completeBtn.addEventListener("click", () => handleCompleteTopic(topic));
@@ -1664,7 +1671,7 @@ function createTopicCard(topic, options = {}) {
 
   if (options.calendar) {
     card.addEventListener("click", (e) => {
-      if (e.target.closest("button")) return;
+      if (e.target.closest("button, .topic-more-actions")) return;
       card.classList.toggle("is-expanded");
     });
   }
@@ -1673,6 +1680,10 @@ function createTopicCard(topic, options = {}) {
     unscheduleBtn.addEventListener("click", () => handleUnschedule(topic));
   } else {
     unscheduleBtn.remove();
+  }
+
+  if (!moreMenu.querySelector("button")) {
+    moreActions.remove();
   }
 
   return fragment;
@@ -2053,8 +2064,6 @@ async function submitSchedule(event) {
   elements.scheduleDialog.close();
   if (state.scheduleQueue.length) {
     advanceScheduleQueue();
-  } else if (hasLarkVotingPool()) {
-    openLarkVotingDialog(data.topic);
   }
 }
 
@@ -2070,10 +2079,6 @@ function hasLarkVotingPool() {
 }
 
 function openLarkVotingDialog(topic) {
-  if (!topic?.scheduledDate) {
-    showToast("选题进入正式排期后才能提交团队投票。");
-    return;
-  }
   if (!hasLarkVotingPool()) {
     showToast("请先在工作区设置中填写飞书多维表格链接。", {
       label: "打开设置",
@@ -2095,7 +2100,9 @@ function openLarkVotingDialog(topic) {
   elements.larkVotingSummary.value = topic.larkVotingSummary || suggestedSummary;
   elements.larkVotingHint.textContent = topic.larkVotingRecordId
     ? "这次会更新原有飞书文档和记录，团队已有的投票字段不会被覆盖。"
-    : "Afu 会创建飞书文档并写入当天投票池；票数和投票人由团队在表内维护。";
+    : topic.scheduledDate
+      ? "Afu 会创建飞书文档并写入当天投票池；票数和投票人由团队在表内维护。"
+      : "Afu 会创建飞书文档并写入投票池，排期保持为空；票数和投票人由团队在表内维护。";
   elements.larkVotingDialog.showModal();
   elements.larkVotingSummary.focus();
   elements.larkVotingSummary.select();

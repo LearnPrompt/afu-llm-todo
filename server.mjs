@@ -1723,14 +1723,17 @@ async function scheduleTopic(payload) {
 
   await writeTopicFile(filePath, topic, source.body);
   let larkVotingRefreshWarning = "";
+  let larkVotingRefreshWarnings = [];
   if (topic.lark_voting_doc_id || topic.lark_voting_record_id) {
     try {
-      await submitTopicToLarkVoting({
+      const votingResult = await submitTopicToLarkVoting({
         path: source.relPath,
         summary: topic.lark_voting_summary,
       });
+      larkVotingRefreshWarnings = votingResult.warnings || [];
     } catch (error) {
       larkVotingRefreshWarning = formatCalendarSyncError(error);
+      larkVotingRefreshWarnings = [`飞书投票资料回填失败：${larkVotingRefreshWarning}`];
       const latestSource = await loadTopicSource(filePath);
       const latestTitle = extractTitle(latestSource.body, path.basename(filePath, ".md"));
       const latestTopic = normalizeTopic(latestSource.frontmatter, latestTitle, latestSource.relPath);
@@ -1750,7 +1753,7 @@ async function scheduleTopic(payload) {
   return {
     ok: true,
     topic: await readTopic(filePath),
-    warnings: larkVotingRefreshWarning ? [`飞书投票资料回填失败：${larkVotingRefreshWarning}`] : [],
+    warnings: larkVotingRefreshWarnings,
   };
 }
 
@@ -1897,15 +1900,18 @@ async function unscheduleTopic(payload) {
 
   await writeTopicFile(filePath, topic, source.body);
   let larkVotingRefreshWarning = "";
+  let larkVotingRefreshWarnings = [];
   if (topic.lark_voting_doc_id || topic.lark_voting_record_id) {
     try {
-      await submitTopicToLarkVoting({
+      const votingResult = await submitTopicToLarkVoting({
         path: source.relPath,
         summary: topic.lark_voting_summary,
         clearScheduledAt: true,
       });
+      larkVotingRefreshWarnings = votingResult.warnings || [];
     } catch (error) {
       larkVotingRefreshWarning = formatCalendarSyncError(error);
+      larkVotingRefreshWarnings = [`飞书投票资料回填失败：${larkVotingRefreshWarning}`];
       const latestSource = await loadTopicSource(filePath);
       const latestTitle = extractTitle(latestSource.body, path.basename(filePath, ".md"));
       const latestTopic = normalizeTopic(latestSource.frontmatter, latestTitle, latestSource.relPath);
@@ -1922,7 +1928,7 @@ async function unscheduleTopic(payload) {
   return {
     ok: true,
     topic: await readTopic(filePath),
-    warnings: larkVotingRefreshWarning ? [`飞书投票资料回填失败：${larkVotingRefreshWarning}`] : [],
+    warnings: larkVotingRefreshWarnings,
   };
 }
 
@@ -3553,7 +3559,8 @@ function buildLarkDocumentUrl(baseUrl, documentId) {
 }
 
 function isMissingLarkDocumentError(error) {
-  return /(?:not found|does not exist|不存在|404)/iu.test(String(error?.message || error || ""));
+  return /(?:(?:document|docx|文档)[^\n]{0,80}(?:not found|does not exist|不存在|404)|(?:not found|does not exist|不存在|404)[^\n]{0,80}(?:document|docx|文档))/iu
+    .test(String(error?.message || error || ""));
 }
 
 async function createLarkVotingDocument({ title, content }) {

@@ -1649,7 +1649,6 @@ function createTopicCard(topic, options = {}) {
   const completeBtn = fragment.querySelector('[data-action="complete"]');
   const scheduleBtn = fragment.querySelector('[data-action="schedule"]');
   const larkVotingBtn = fragment.querySelector('[data-action="lark-voting"]');
-  const moreActions = fragment.querySelector(".topic-more-actions");
   const moreMenu = fragment.querySelector(".topic-more-menu");
   const unscheduleBtn = fragment.querySelector('[data-action="unschedule"]');
   const revertImportBtn = fragment.querySelector('[data-action="revert-import"]');
@@ -1686,10 +1685,6 @@ function createTopicCard(topic, options = {}) {
     unscheduleBtn.addEventListener("click", () => handleUnschedule(topic));
   } else {
     unscheduleBtn.remove();
-  }
-
-  if (!moreMenu.querySelector("button")) {
-    moreActions.remove();
   }
 
   return fragment;
@@ -2100,6 +2095,7 @@ function openLarkVotingDialog(topic) {
   }
 
   state.larkVotingTarget = topic;
+  setLarkVotingSubmitting(false);
   const displayTitle = stripTopicPrefix(topic.title);
   const excerpt = String(topic.excerpt || "").trim();
   const suggestedSummary = excerpt && excerpt !== "选题判断" && excerpt !== "暂无摘要" ? excerpt : displayTitle;

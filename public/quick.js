@@ -19,6 +19,7 @@ const state = {
   settings: null,
   lark: null,
   deferredPaths: new Set(),
+  reviewedPaths: new Set(),
   processedCount: 0,
   initialCount: 0,
   busy: false,
@@ -217,6 +218,7 @@ async function loadTopics({ resetSession = false } = {}) {
   setBusy(true);
   if (resetSession) {
     state.deferredPaths.clear();
+    state.reviewedPaths.clear();
     state.processedCount = 0;
   }
 
@@ -245,7 +247,7 @@ async function loadTopics({ resetSession = false } = {}) {
 
 function rebuildQueue() {
   state.queue = buildReviewQueue(state.topics)
-    .filter((topic) => !state.deferredPaths.has(topic.path));
+    .filter((topic) => !state.deferredPaths.has(topic.path) && !state.reviewedPaths.has(topic.path));
 }
 
 function render() {
@@ -506,16 +508,16 @@ async function submitVotingTopic(event) {
   const wasCurrentReviewCard = state.queue[0]?.path === topic.path;
   setBusy(true);
   try {
-    await postJson("/api/topics/lark-voting", { path: topic.path, summary });
+    const data = await postJson("/api/topics/lark-voting", { path: topic.path, summary });
     if (wasCurrentReviewCard) {
-      state.deferredPaths.add(topic.path);
+      state.reviewedPaths.add(topic.path);
       await animateCardAway();
       state.processedCount += 1;
     }
     elements.voteDialog.close();
     state.votingTarget = null;
     await refreshAfterAction();
-    showToast("已送进团队投票池");
+    showToast(withOperationWarnings("已送进团队投票池", data.warnings));
     vibrate();
   } catch (error) {
     elements.currentCard.classList.remove("is-leaving");

@@ -6,7 +6,7 @@ import { buildLarkStubScript } from './helpers/lark-stub.mjs';
 
 const BASE_URL = 'https://example.feishu.cn/base/base_demo?table=tbl_vote';
 
-function buildVotingStub() {
+function buildVotingStub({ failures = [] } = {}) {
   return buildLarkStubScript({
     responses: {
       'base +url-resolve --url': JSON.stringify({
@@ -43,6 +43,7 @@ function buildVotingStub() {
         },
       }),
     },
+    failures,
   });
 }
 
@@ -114,7 +115,7 @@ test('scheduled topic creates one Base record and later updates the same record'
   }
 });
 
-test('topic must be scheduled before it can enter the Base voting pool', async () => {
+test('unscheduled topic enters the Base voting pool without writing a fake schedule', async () => {
   const server = await spawnPlannerServer({
     settings: { larkVotingBaseUrl: BASE_URL },
     larkStub: buildVotingStub(),
@@ -131,9 +132,109 @@ test('topic must be scheduled before it can enter the Base voting pool', async (
       method: 'POST',
       body: JSON.stringify({ path: relPath, summary: '一句话' }),
     });
-    assert.equal(response.status, 400);
-    assert.match(response.json.error, /正式排期后/);
-    assert.equal(await server.readStubLog(), '');
+    assert.equal(response.status, 200, response.text);
+    assert.equal(response.json.created, true);
+    assert.equal(response.json.topic.stage, '待投票');
+    assert.equal(response.json.topic.scheduledDate, '');
+
+    const saved = await server.readTopicCard('【选题】还没排期.md');
+    assert.match(saved, /stage: 待投票/);
+    assert.match(saved, /lark_voting_doc_id: docx_vote_1/);
+    assert.match(saved, /lark_voting_record_id: rec_vote_1/);
+
+    const upsert = (await server.readStubLog()).split('\n').find((line) => line.startsWith('base +record-upsert'));
+    assert.ok(upsert);
+    assert.doesNotMatch(upsert, /排期时间/);
+  } finally {
+    await server.close();
+  }
+});
+
+test('scheduling a voting topic refreshes the same Feishu document and record', async () => {
+  const server = await spawnPlannerServer({
+    settings: { larkVotingBaseUrl: BASE_URL },
+    larkStub: buildVotingStub(),
+  });
+  try {
+    const relPath = await server.writeTopicCard('【选题】先投票再排期.md', [
+      'type: topic',
+      'topic_id: topic-vote-then-schedule',
+      'status: active',
+      'stage: 待排期',
+    ]);
+
+    const voted = await server.request('/api/topics/lark-voting', {
+      method: 'POST',
+      body: JSON.stringify({ path: relPath, summary: '先让团队判断是否值得做。' }),
+    });
+    assert.equal(voted.status, 200, voted.text);
+
+    const scheduled = await server.request('/api/topics/schedule', {
+      method: 'POST',
+      body: JSON.stringify({
+        path: relPath,
+        scheduledDate: '2026-08-12',
+        scheduledStart: '14:00',
+        scheduledEnd: '15:00',
+        calendarProvider: 'none',
+      }),
+    });
+    assert.equal(scheduled.status, 200, scheduled.text);
+    assert.equal(scheduled.json.topic.stage, '已排期');
+    assert.equal(scheduled.json.topic.scheduledDate, '2026-08-12');
+
+    const logLines = (await server.readStubLog()).split('\n').filter(Boolean);
+    assert.equal(logLines.filter((line) => line.startsWith('docs +create')).length, 1);
+    assert.equal(logLines.filter((line) => line.startsWith('docs +update')).length, 1);
+    const upserts = logLines.filter((line) => line.startsWith('base +record-upsert'));
+    assert.equal(upserts.length, 2);
+    assert.match(upserts[1], /--record-id rec_vote_1/);
+    assert.match(upserts[1], /排期时间/);
+    assert.match(upserts[1], /2026-08-12 14:00:00/);
+
+    const unscheduled = await server.request('/api/topics/unschedule', {
+      method: 'POST',
+      body: JSON.stringify({ path: relPath, removeFromCalendar: false }),
+    });
+    assert.equal(unscheduled.status, 200, unscheduled.text);
+    assert.equal(unscheduled.json.topic.stage, '待投票');
+  } finally {
+    await server.close();
+  }
+});
+
+test('Feishu refresh failure does not roll back a saved schedule', async () => {
+  const server = await spawnPlannerServer({
+    settings: { larkVotingBaseUrl: BASE_URL },
+    larkStub: buildVotingStub({ failures: ['docs +update --doc'] }),
+  });
+  try {
+    const relPath = await server.writeTopicCard('【选题】排期回填失败.md', [
+      'type: topic',
+      'topic_id: topic-vote-refresh-failure',
+      'status: active',
+      'stage: 待排期',
+    ]);
+    const voted = await server.request('/api/topics/lark-voting', {
+      method: 'POST',
+      body: JSON.stringify({ path: relPath, summary: '先投票。' }),
+    });
+    assert.equal(voted.status, 200, voted.text);
+
+    const scheduled = await server.request('/api/topics/schedule', {
+      method: 'POST',
+      body: JSON.stringify({
+        path: relPath,
+        scheduledDate: '2026-08-13',
+        scheduledStart: '09:30',
+        scheduledEnd: '11:00',
+        calendarProvider: 'none',
+      }),
+    });
+    assert.equal(scheduled.status, 200, scheduled.text);
+    assert.equal(scheduled.json.topic.stage, '已排期');
+    assert.equal(scheduled.json.topic.scheduledDate, '2026-08-13');
+    assert.match(scheduled.json.topic.larkVotingSyncStatus, /回填失败/);
   } finally {
     await server.close();
   }

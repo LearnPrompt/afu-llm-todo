@@ -1722,14 +1722,36 @@ async function scheduleTopic(payload) {
   }
 
   await writeTopicFile(filePath, topic, source.body);
+  let larkVotingRefreshWarning = "";
+  if (topic.lark_voting_doc_id || topic.lark_voting_record_id) {
+    try {
+      await submitTopicToLarkVoting({
+        path: source.relPath,
+        summary: topic.lark_voting_summary,
+      });
+    } catch (error) {
+      larkVotingRefreshWarning = formatCalendarSyncError(error);
+      const latestSource = await loadTopicSource(filePath);
+      const latestTitle = extractTitle(latestSource.body, path.basename(filePath, ".md"));
+      const latestTopic = normalizeTopic(latestSource.frontmatter, latestTitle, latestSource.relPath);
+      latestTopic.lark_voting_sync_status = `排期已保存，飞书回填失败：${larkVotingRefreshWarning}`;
+      latestTopic.updated = localDateString();
+      await writeTopicFile(filePath, latestTopic, latestSource.body);
+    }
+  }
   await appendPlannerLog("topic-schedule", title, {
     path: source.relPath,
     date,
     time: `${startTime}-${endTime}`,
     calendarProvider,
     calendarSyncStatus: topic.calendar_sync_status,
+    larkVotingRefreshWarning,
   });
-  return { ok: true, topic: await readTopic(filePath) };
+  return {
+    ok: true,
+    topic: await readTopic(filePath),
+    warnings: larkVotingRefreshWarning ? [`飞书投票资料回填失败：${larkVotingRefreshWarning}`] : [],
+  };
 }
 
 async function submitTopicToLarkVoting(payload) {
@@ -1737,9 +1759,6 @@ async function submitTopicToLarkVoting(payload) {
   const source = await loadTopicSource(filePath);
   const title = extractTitle(source.body, path.basename(filePath, ".md"));
   const topic = normalizeTopic(source.frontmatter, title, source.relPath);
-  if (!topic.scheduled_date) {
-    throw badRequest("选题进入正式排期后才能提交团队投票");
-  }
 
   const settings = await getPlannerSettings();
   const baseUrl = optionalString(settings.larkVotingBaseUrl);
@@ -1794,6 +1813,9 @@ async function submitTopicToLarkVoting(payload) {
   topic.lark_voting_date = votingDate;
   topic.lark_voting_summary = summary;
   topic.lark_voting_sync_status = `飞书文档已${document.created ? "创建" : "更新"}，投票池写入待重试`;
+  if (!topic.scheduled_date) {
+    topic.stage = "待投票";
+  }
   topic.updated = localDateString();
   await writeTopicFile(filePath, topic, source.body);
 
@@ -1804,7 +1826,9 @@ async function submitTopicToLarkVoting(payload) {
     summary,
     tags: [...topic.target_forms, ...topic.platforms, ...topic.tags],
     sourceUrl: topic.source_url,
-    scheduledAt: `${topic.scheduled_date} ${topic.scheduled_start || "00:00"}:00`,
+    scheduledAt: topic.scheduled_date
+      ? `${topic.scheduled_date} ${topic.scheduled_start || "00:00"}:00`
+      : "",
     afuPath: source.relPath,
     documentUrl: document.documentUrl,
     votingDate: `${votingDate} 00:00:00`,
@@ -1866,7 +1890,7 @@ async function unscheduleTopic(payload) {
   topic.scheduled_date = "";
   topic.scheduled_start = "";
   topic.scheduled_end = "";
-  topic.stage = "待排期";
+  topic.stage = topic.lark_voting_doc_id || topic.lark_voting_record_id ? "待投票" : "待排期";
   topic.updated = todayString();
 
   await writeTopicFile(filePath, topic, source.body);
@@ -2678,7 +2702,7 @@ function compareTopics(left, right) {
     }
   }
 
-  const stageOrder = ["待排期", "去重中", "已排期", "制作中", "已发布", "已拒绝", "已归档"];
+  const stageOrder = ["待排期", "去重中", "待投票", "已排期", "制作中", "已发布", "已拒绝", "已归档"];
   const leftStage = stageOrder.indexOf(left.stage);
   const rightStage = stageOrder.indexOf(right.stage);
   if (leftStage !== rightStage) {
@@ -3447,7 +3471,7 @@ function buildLarkVotingDocumentContent({ title, summary, topic, body, afuPath }
     topic.scheduled_start && topic.scheduled_end
       ? `${topic.scheduled_start}–${topic.scheduled_end}`
       : topic.scheduled_start,
-  ].filter(Boolean).join(" ");
+  ].filter(Boolean).join(" ") || "待排期";
   return [
     "> 本文档由 Afu 从 Markdown 自动同步。请在 Afu / Obsidian 修改原文，团队在多维表格中投票。",
     "",

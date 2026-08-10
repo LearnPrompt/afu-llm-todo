@@ -147,6 +147,12 @@ function bindEvents() {
   elements.voteBtn.addEventListener("click", () => handleVotingAction(state.queue[0]));
   elements.voteForm.addEventListener("submit", submitVotingTopic);
   elements.cancelVoteBtn.addEventListener("click", closeVoteDialog);
+  elements.voteDialog.addEventListener("cancel", (event) => {
+    if (state.busy) event.preventDefault();
+  });
+  elements.voteDialog.addEventListener("close", () => {
+    if (!state.busy) state.votingTarget = null;
+  });
   elements.reviewLaterBtn.addEventListener("click", reviewDeferredTopics);
   elements.refreshEmptyBtn.addEventListener("click", () => loadTopics({ resetSession: true }));
   elements.dismissInstallHint.addEventListener("click", dismissInstallHint);
@@ -264,8 +270,8 @@ function render() {
   elements.topicExcerpt.textContent = current.excerpt || "这张卡还没有摘要，先根据标题判断是否值得排进日历。";
   elements.topicUpdated.textContent = current.updated ? `更新于 ${current.updated}` : "等待判断";
   elements.queuePosition.textContent = `剩余 ${state.queue.length} 张`;
-  elements.voteBtn.hidden = !hasLarkVotingPool() && !current.larkVotingDocUrl;
-  elements.voteBtn.textContent = current.larkVotingDocUrl ? "打开团队投票 ↗" : "送团队投票";
+  elements.voteBtn.hidden = !hasLarkVotingPool() && !getVotingDestinationUrl(current);
+  elements.voteBtn.textContent = hasSubmittedVoting(current) ? "打开团队投票 ↗" : "送团队投票";
 
   const reason = String(current.llmTodoReason || "").trim();
   elements.topicReason.hidden = !reason;
@@ -399,8 +405,8 @@ function createWorkspaceTopicCard(topic, { scheduled }) {
     actions.append(schedule);
   }
 
-  if (hasLarkVotingPool() || topic.larkVotingDocUrl) {
-    const vote = createWorkspaceAction(topic.larkVotingDocUrl ? "打开投票" : "送团队投票", "secondary");
+  if (hasLarkVotingPool() || getVotingDestinationUrl(topic)) {
+    const vote = createWorkspaceAction(hasSubmittedVoting(topic) ? "打开投票" : "送团队投票", "secondary");
     vote.addEventListener("click", () => handleVotingAction(topic));
     actions.append(vote);
   }
@@ -432,12 +438,12 @@ async function unscheduleWorkspaceTopic(topic) {
 
   setBusy(true);
   try {
-    await postJson("/api/topics/unschedule", {
+    const data = await postJson("/api/topics/unschedule", {
       path: topic.path,
       removeFromCalendar: true,
     });
     await refreshAfterAction();
-    showToast("已取消排期");
+    showToast(withOperationWarnings("已取消排期", data.warnings));
     vibrate();
   } catch (error) {
     showToast(error.message);
@@ -450,10 +456,19 @@ function hasLarkVotingPool() {
   return Boolean(String(state.settings?.larkVotingBaseUrl || "").trim());
 }
 
+function hasSubmittedVoting(topic) {
+  return Boolean(topic?.larkVotingRecordId || topic?.larkVotingDocId || topic?.larkVotingDocUrl);
+}
+
+function getVotingDestinationUrl(topic) {
+  return String(state.settings?.larkVotingBaseUrl || topic?.larkVotingDocUrl || "").trim();
+}
+
 function handleVotingAction(topic) {
-  if (!topic || state.busy) return;
-  if (topic.larkVotingDocUrl) {
-    window.open(topic.larkVotingDocUrl, "_blank", "noopener");
+  if (!topic || state.busy || elements.voteDialog.open) return;
+  const destinationUrl = getVotingDestinationUrl(topic);
+  if (hasSubmittedVoting(topic) && destinationUrl) {
+    window.open(destinationUrl, "_blank", "noopener,noreferrer");
     return;
   }
   if (!hasLarkVotingPool()) {
@@ -735,7 +750,7 @@ async function submitScheduleDialog(event) {
   draft.serverError = "";
   setBusy(true);
   try {
-    await postJson("/api/topics/schedule", {
+    const data = await postJson("/api/topics/schedule", {
       path: draft.path,
       scheduledDate: draft.date,
       scheduledStart: draft.start,
@@ -748,7 +763,7 @@ async function submitScheduleDialog(event) {
     }
     closeScheduleDialog();
     await refreshAfterAction();
-    showToast(`已排到 ${successLabel}`);
+    showToast(withOperationWarnings(`已排到 ${successLabel}`, data.warnings));
     vibrate();
   } catch (submitError) {
     elements.currentCard.classList.remove("is-leaving");
@@ -784,7 +799,7 @@ async function scheduleCurrentTopic(kind) {
 
   setBusy(true);
   try {
-    await postJson("/api/topics/schedule", {
+    const data = await postJson("/api/topics/schedule", {
       path: topic.path,
       scheduledDate: suggestion.date,
       scheduledStart: suggestion.start,
@@ -795,7 +810,7 @@ async function scheduleCurrentTopic(kind) {
     state.processedCount += 1;
     await refreshAfterAction();
     const capacityNote = suggestion.overRecommendedCapacity ? "，已超过推荐容量" : "";
-    showToast(`已排到${suggestion.dayLabel} ${suggestion.start}${capacityNote}`);
+    showToast(withOperationWarnings(`已排到${suggestion.dayLabel} ${suggestion.start}${capacityNote}`, data.warnings));
     vibrate();
   } catch (error) {
     elements.currentCard.classList.remove("is-leaving");
@@ -968,6 +983,12 @@ function showToast(message) {
   toastTimer = window.setTimeout(() => {
     elements.toast.hidden = true;
   }, 2200);
+}
+
+function withOperationWarnings(message, warnings) {
+  return Array.isArray(warnings) && warnings.length
+    ? `${message}；${warnings.join("；")}`
+    : message;
 }
 
 function vibrate() {

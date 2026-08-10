@@ -1678,7 +1678,7 @@ async function scheduleTopic(payload) {
   topic.scheduled_end = endTime;
   topic.stage = "已排期";
   topic.status = "active";
-  topic.updated = todayString();
+  topic.updated = localDateString();
   topic.drop_action = "";
   topic.drop_reason = "";
 
@@ -1804,6 +1804,7 @@ async function submitTopicToLarkVoting(payload) {
   const document = await syncLarkVotingDocument({
     documentId: topic.lark_voting_doc_id,
     documentUrl: topic.lark_voting_doc_url,
+    fallbackDocumentUrl: buildLarkDocumentUrl(baseUrl, topic.lark_voting_doc_id),
     title: `选题｜${displayTitle}`,
     content: documentContent,
   });
@@ -1813,7 +1814,7 @@ async function submitTopicToLarkVoting(payload) {
   topic.lark_voting_date = votingDate;
   topic.lark_voting_summary = summary;
   topic.lark_voting_sync_status = `飞书文档已${document.created ? "创建" : "更新"}，投票池写入待重试`;
-  if (!topic.scheduled_date) {
+  if (!topic.scheduled_date && ["待排期", "去重中", "待投票"].includes(topic.stage)) {
     topic.stage = "待投票";
   }
   topic.updated = localDateString();
@@ -1829,6 +1830,7 @@ async function submitTopicToLarkVoting(payload) {
     scheduledAt: topic.scheduled_date
       ? `${topic.scheduled_date} ${topic.scheduled_start || "00:00"}:00`
       : "",
+    clearScheduledAt: Boolean(payload.clearScheduledAt) && !topic.scheduled_date,
     afuPath: source.relPath,
     documentUrl: document.documentUrl,
     votingDate: `${votingDate} 00:00:00`,
@@ -1891,14 +1893,37 @@ async function unscheduleTopic(payload) {
   topic.scheduled_start = "";
   topic.scheduled_end = "";
   topic.stage = topic.lark_voting_doc_id || topic.lark_voting_record_id ? "待投票" : "待排期";
-  topic.updated = todayString();
+  topic.updated = localDateString();
 
   await writeTopicFile(filePath, topic, source.body);
+  let larkVotingRefreshWarning = "";
+  if (topic.lark_voting_doc_id || topic.lark_voting_record_id) {
+    try {
+      await submitTopicToLarkVoting({
+        path: source.relPath,
+        summary: topic.lark_voting_summary,
+        clearScheduledAt: true,
+      });
+    } catch (error) {
+      larkVotingRefreshWarning = formatCalendarSyncError(error);
+      const latestSource = await loadTopicSource(filePath);
+      const latestTitle = extractTitle(latestSource.body, path.basename(filePath, ".md"));
+      const latestTopic = normalizeTopic(latestSource.frontmatter, latestTitle, latestSource.relPath);
+      latestTopic.lark_voting_sync_status = `取消排期已保存，飞书回填失败：${larkVotingRefreshWarning}`;
+      latestTopic.updated = localDateString();
+      await writeTopicFile(filePath, latestTopic, latestSource.body);
+    }
+  }
   await appendPlannerLog("topic-unschedule", title, {
     path: source.relPath,
     removeFromCalendar: String(Boolean(payload.removeFromCalendar)),
+    larkVotingRefreshWarning,
   });
-  return { ok: true, topic: await readTopic(filePath) };
+  return {
+    ok: true,
+    topic: await readTopic(filePath),
+    warnings: larkVotingRefreshWarning ? [`飞书投票资料回填失败：${larkVotingRefreshWarning}`] : [],
+  };
 }
 
 async function disposeTopic(payload, options = {}) {
@@ -3405,6 +3430,7 @@ function buildLarkVotingFields({
   tags,
   sourceUrl,
   scheduledAt,
+  clearScheduledAt = false,
   afuPath,
   documentUrl,
   votingDate,
@@ -3425,14 +3451,15 @@ function buildLarkVotingFields({
     { key: "summary", value: summary, kind: "text" },
     { key: "tags", value: [...new Set(tags.map((tag) => optionalString(tag)).filter(Boolean))], kind: "tags" },
     { key: "sourceUrl", value: sourceUrl, kind: "url" },
-    { key: "scheduledAt", value: scheduledAt, kind: "datetime" },
+    { key: "scheduledAt", value: scheduledAt, kind: "datetime", includeEmpty: clearScheduledAt },
     { key: "afuPath", value: afuPath, kind: "text" },
     { key: "documentUrl", value: documentUrl, kind: "url" },
     { key: "votingDate", value: votingDate, kind: "datetime" },
   ];
 
   for (const candidate of candidates) {
-    if (!candidate.value || (Array.isArray(candidate.value) && !candidate.value.length)) continue;
+    const isEmpty = !candidate.value || (Array.isArray(candidate.value) && !candidate.value.length);
+    if (isEmpty && !candidate.includeEmpty) continue;
     const fieldName = optionalString(fieldNames?.[candidate.key]);
     if (!fieldName) continue;
     const field = byName.get(fieldName);
@@ -3444,7 +3471,9 @@ function buildLarkVotingFields({
       warnings.push(`跳过类型不匹配的字段「${fieldName}」`);
       continue;
     }
-    fields[fieldName] = formatLarkVotingCellValue(candidate.value, field, candidate.kind);
+    fields[fieldName] = candidate.includeEmpty && isEmpty
+      ? null
+      : formatLarkVotingCellValue(candidate.value, field, candidate.kind);
   }
 
   return { fields, warnings };
@@ -3513,25 +3542,21 @@ function escapeMarkdownCode(value) {
   return String(value || "").replace(/`/g, "\\`").replace(/\r?\n/g, " ");
 }
 
-async function syncLarkVotingDocument({ documentId, documentUrl, title, content }) {
-  const existingDocumentId = optionalString(documentId);
-  const existingDocumentUrl = optionalString(documentUrl);
-  if (existingDocumentId) {
-    if (!existingDocumentUrl) {
-      throw new Error("选题已记录飞书文档 ID，但缺少文档链接；请修复 frontmatter 后重试");
-    }
-    await execJson("lark-cli", [
-      "docs", "+update", "--doc", existingDocumentId,
-      "--command", "overwrite", "--doc-format", "markdown", "--content", "-",
-      "--as", "user", "--format", "json",
-    ], { input: content });
-    return {
-      created: false,
-      documentId: existingDocumentId,
-      documentUrl: existingDocumentUrl,
-    };
+function buildLarkDocumentUrl(baseUrl, documentId) {
+  const id = optionalString(documentId);
+  if (!id) return "";
+  try {
+    return `${new URL(baseUrl).origin}/docx/${encodeURIComponent(id)}`;
+  } catch {
+    return "";
   }
+}
 
+function isMissingLarkDocumentError(error) {
+  return /(?:not found|does not exist|不存在|404)/iu.test(String(error?.message || error || ""));
+}
+
+async function createLarkVotingDocument({ title, content }) {
   const payload = await execJson("lark-cli", [
     "docs", "+create", "--doc-format", "markdown", "--title", title.slice(0, 500),
     "--content", "-", "--as", "user", "--format", "json",
@@ -3541,6 +3566,34 @@ async function syncLarkVotingDocument({ documentId, documentUrl, title, content 
     throw new Error("飞书已返回文档创建成功响应，但缺少文档 ID 或链接");
   }
   return { created: true, ...document };
+}
+
+async function syncLarkVotingDocument({ documentId, documentUrl, fallbackDocumentUrl, title, content }) {
+  const existingDocumentId = optionalString(documentId);
+  const existingDocumentUrl = optionalString(documentUrl) || optionalString(fallbackDocumentUrl);
+  if (existingDocumentId) {
+    try {
+      await execJson("lark-cli", [
+        "docs", "+update", "--doc", existingDocumentId,
+        "--command", "overwrite", "--doc-format", "markdown", "--content", "-",
+        "--as", "user", "--format", "json",
+      ], { input: content });
+    } catch (error) {
+      if (isMissingLarkDocumentError(error)) {
+        return createLarkVotingDocument({ title, content });
+      }
+      throw error;
+    }
+    if (!existingDocumentUrl) {
+      throw new Error("选题已记录飞书文档 ID，但无法恢复文档链接");
+    }
+    return {
+      created: false,
+      documentId: existingDocumentId,
+      documentUrl: existingDocumentUrl,
+    };
+  }
+  return createLarkVotingDocument({ title, content });
 }
 
 function extractLarkDocumentCoordinates(payload) {

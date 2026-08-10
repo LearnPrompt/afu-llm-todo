@@ -464,7 +464,7 @@ input:focus-visible {
   position: relative;
   z-index: 1;
   width: fit-content;
-  min-height: 38px;
+  min-height: 44px;
   margin-top: 14px;
   padding: 0 13px;
   border: 1px solid rgba(61, 115, 85, 0.24);

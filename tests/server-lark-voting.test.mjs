@@ -6,7 +6,7 @@ import { buildLarkStubScript } from './helpers/lark-stub.mjs';
 
 const BASE_URL = 'https://example.feishu.cn/base/base_demo?table=tbl_vote';
 
-function buildVotingStub({ failures = [] } = {}) {
+function buildVotingStub({ failures = [], responseOverrides = {} } = {}) {
   return buildLarkStubScript({
     responses: {
       'base +url-resolve --url': JSON.stringify({
@@ -42,6 +42,7 @@ function buildVotingStub({ failures = [] } = {}) {
           record: { record_id_list: ['rec_vote_1'] },
         },
       }),
+      ...responseOverrides,
     },
     failures,
   });
@@ -198,6 +199,165 @@ test('scheduling a voting topic refreshes the same Feishu document and record', 
     });
     assert.equal(unscheduled.status, 200, unscheduled.text);
     assert.equal(unscheduled.json.topic.stage, '待投票');
+    assert.deepEqual(unscheduled.json.warnings, []);
+
+    const afterUnschedule = (await server.readStubLog()).split('\n').filter(Boolean);
+    assert.equal(afterUnschedule.filter((line) => line.startsWith('docs +update')).length, 2);
+    const afterUnscheduleUpserts = afterUnschedule.filter((line) => line.startsWith('base +record-upsert'));
+    assert.equal(afterUnscheduleUpserts.length, 3);
+    assert.match(afterUnscheduleUpserts[2], /--record-id rec_vote_1/);
+    assert.match(afterUnscheduleUpserts[2], /排期时间[^}]*null/);
+  } finally {
+    await server.close();
+  }
+});
+
+test('unscheduling a never-voted topic returns it to the scheduling pool without touching Feishu', async () => {
+  const server = await spawnPlannerServer({
+    settings: { larkVotingBaseUrl: BASE_URL },
+    larkStub: buildVotingStub(),
+  });
+  try {
+    const relPath = await server.writeTopicCard('【选题】普通已排期.md', [
+      'type: topic',
+      'topic_id: topic-unschedule-without-vote',
+      'status: active',
+      'stage: 已排期',
+      'scheduled_date: 2026-08-15',
+      'scheduled_start: 09:30',
+      'scheduled_end: 11:00',
+    ]);
+
+    const response = await server.request('/api/topics/unschedule', {
+      method: 'POST',
+      body: JSON.stringify({ path: relPath, removeFromCalendar: false }),
+    });
+    assert.equal(response.status, 200, response.text);
+    assert.equal(response.json.topic.stage, '待排期');
+    assert.equal(response.json.topic.scheduledDate, '');
+    assert.deepEqual(response.json.warnings, []);
+    assert.equal(await server.readStubLog(), '');
+  } finally {
+    await server.close();
+  }
+});
+
+test('Feishu refresh failure does not roll back a cancelled schedule', async () => {
+  const server = await spawnPlannerServer({
+    settings: { larkVotingBaseUrl: BASE_URL },
+    larkStub: buildVotingStub({ failures: ['docs +update --doc'] }),
+  });
+  try {
+    const relPath = await server.writeTopicCard('【选题】取消排期回填失败.md', [
+      'type: topic',
+      'topic_id: topic-unschedule-refresh-failure',
+      'status: active',
+      'stage: 已排期',
+      'scheduled_date: 2026-08-16',
+      'scheduled_start: 14:00',
+      'scheduled_end: 15:00',
+      'lark_voting_doc_id: docx_vote_1',
+      'lark_voting_doc_url: https://example.feishu.cn/docx/docx_vote_1',
+      'lark_voting_record_id: rec_vote_1',
+      'lark_voting_summary: 测试取消排期',
+    ]);
+
+    const response = await server.request('/api/topics/unschedule', {
+      method: 'POST',
+      body: JSON.stringify({ path: relPath, removeFromCalendar: false }),
+    });
+    assert.equal(response.status, 200, response.text);
+    assert.equal(response.json.topic.stage, '待投票');
+    assert.equal(response.json.topic.scheduledDate, '');
+    assert.match(response.json.topic.larkVotingSyncStatus, /取消排期已保存，飞书回填失败/);
+    assert.equal(response.json.warnings.length, 1);
+  } finally {
+    await server.close();
+  }
+});
+
+test('submitting an unscheduled in-progress topic preserves its workflow stage', async () => {
+  const server = await spawnPlannerServer({
+    settings: { larkVotingBaseUrl: BASE_URL },
+    larkStub: buildVotingStub(),
+  });
+  try {
+    const relPath = await server.writeTopicCard('【选题】正在制作.md', [
+      'type: topic',
+      'topic_id: topic-in-progress-vote',
+      'status: active',
+      'stage: 制作中',
+    ]);
+
+    const response = await server.request('/api/topics/lark-voting', {
+      method: 'POST',
+      body: JSON.stringify({ path: relPath, summary: '保持原工作流阶段。' }),
+    });
+    assert.equal(response.status, 200, response.text);
+    assert.equal(response.json.topic.stage, '制作中');
+  } finally {
+    await server.close();
+  }
+});
+
+test('a missing document URL is recovered from the configured Feishu origin', async () => {
+  const server = await spawnPlannerServer({
+    settings: { larkVotingBaseUrl: BASE_URL },
+    larkStub: buildVotingStub(),
+  });
+  try {
+    const relPath = await server.writeTopicCard('【选题】恢复文档链接.md', [
+      'type: topic',
+      'topic_id: topic-recover-doc-url',
+      'status: active',
+      'stage: 待投票',
+      'lark_voting_doc_id: docx_vote_1',
+      'lark_voting_record_id: rec_vote_1',
+    ]);
+
+    const response = await server.request('/api/topics/lark-voting', {
+      method: 'POST',
+      body: JSON.stringify({ path: relPath, summary: '恢复链接后继续更新。' }),
+    });
+    assert.equal(response.status, 200, response.text);
+    assert.equal(response.json.documentCreated, false);
+    assert.equal(response.json.documentUrl, 'https://example.feishu.cn/docx/docx_vote_1');
+    const saved = await server.readTopicCard('【选题】恢复文档链接.md');
+    assert.match(saved, /lark_voting_doc_url: "https:\/\/example\.feishu\.cn\/docx\/docx_vote_1"/);
+  } finally {
+    await server.close();
+  }
+});
+
+test('a deleted Feishu document is recreated and the existing Base record is reused', async () => {
+  const server = await spawnPlannerServer({
+    settings: { larkVotingBaseUrl: BASE_URL },
+    larkStub: buildVotingStub({
+      failures: ['docs +update --doc'],
+      responseOverrides: { 'docs +update --doc': 'document not found' },
+    }),
+  });
+  try {
+    const relPath = await server.writeTopicCard('【选题】重建飞书文档.md', [
+      'type: topic',
+      'topic_id: topic-recreate-doc',
+      'status: active',
+      'stage: 待投票',
+      'lark_voting_doc_id: docx_deleted',
+      'lark_voting_doc_url: https://example.feishu.cn/docx/docx_deleted',
+      'lark_voting_record_id: rec_vote_1',
+    ]);
+
+    const response = await server.request('/api/topics/lark-voting', {
+      method: 'POST',
+      body: JSON.stringify({ path: relPath, summary: '文档删除后安全重建。' }),
+    });
+    assert.equal(response.status, 200, response.text);
+    assert.equal(response.json.documentCreated, true);
+    assert.equal(response.json.recordId, 'rec_vote_1');
+    const logLines = (await server.readStubLog()).split('\n').filter(Boolean);
+    assert.equal(logLines.filter((line) => line.startsWith('docs +create')).length, 1);
+    assert.match(logLines.find((line) => line.startsWith('base +record-upsert')), /--record-id rec_vote_1/);
   } finally {
     await server.close();
   }

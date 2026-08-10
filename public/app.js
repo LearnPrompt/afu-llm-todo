@@ -399,6 +399,12 @@ function bindEvents() {
   elements.larkVotingForm?.addEventListener("submit", submitLarkVoting);
   elements.larkVotingCancelBtn?.addEventListener("click", closeLarkVotingDialog);
   elements.larkVotingCloseBtn?.addEventListener("click", closeLarkVotingDialog);
+  elements.larkVotingDialog?.addEventListener("cancel", (event) => {
+    if (state.larkVotingSubmitting) event.preventDefault();
+  });
+  elements.larkVotingDialog?.addEventListener("close", () => {
+    if (!state.larkVotingSubmitting) state.larkVotingTarget = null;
+  });
   elements.scheduleStart.addEventListener("input", () => { clearActiveScheduleSlot(); renderScheduleDaySidebar(); });
   elements.scheduleEnd.addEventListener("input", () => { clearActiveScheduleSlot(); renderScheduleDaySidebar(); });
   elements.scheduleDate?.addEventListener("input", () => renderScheduleDaySidebar());
@@ -2060,7 +2066,8 @@ async function submitSchedule(event) {
   const data = await postAndReload("/api/topics/schedule", payload);
   setScheduleSubmitting(false);
   if (!data) return;
-  showToast(getScheduleResultMessage(data.topic, payload.calendarProvider));
+  const votingWarning = data.warnings?.length ? `；${data.warnings.join("；")}` : "";
+  showToast(`${getScheduleResultMessage(data.topic, payload.calendarProvider)}${votingWarning}`);
   elements.scheduleDialog.close();
   if (state.scheduleQueue.length) {
     advanceScheduleQueue();
@@ -2079,6 +2086,7 @@ function hasLarkVotingPool() {
 }
 
 function openLarkVotingDialog(topic) {
+  if (state.larkVotingSubmitting || elements.larkVotingDialog?.open) return;
   if (!hasLarkVotingPool()) {
     showToast("请先在工作区设置中填写飞书多维表格链接。", {
       label: "打开设置",
@@ -2092,7 +2100,6 @@ function openLarkVotingDialog(topic) {
   }
 
   state.larkVotingTarget = topic;
-  setLarkVotingSubmitting(false);
   const displayTitle = stripTopicPrefix(topic.title);
   const excerpt = String(topic.excerpt || "").trim();
   const suggestedSummary = excerpt && excerpt !== "选题判断" && excerpt !== "暂无摘要" ? excerpt : displayTitle;
@@ -2257,10 +2264,11 @@ async function handleCompleteTopic(topic) {
 
 async function handleUnschedule(topic) {
   const hasExternalEvent = Boolean(topic.larkEventId || topic.macosEventId);
+  const returnPool = topic.larkVotingRecordId || topic.larkVotingDocId ? "待投票池" : "待排期池";
   const confirmed = window.confirm(
     hasExternalEvent
-      ? "把这个选题移回待排期池，并删除已经同步的外部日程？"
-      : "把这个选题移回待排期池？",
+      ? `把这个选题移回${returnPool}，并删除已经同步的外部日程？`
+      : `把这个选题移回${returnPool}？`,
   );
   if (!confirmed) return;
 
@@ -2269,7 +2277,9 @@ async function handleUnschedule(topic) {
     removeFromCalendar: hasExternalEvent,
   });
   if (data) {
-    showToast(hasExternalEvent ? "已撤回排期，并删除对应日历事件。" : "已撤回排期。");
+    const warning = data.warnings?.length ? `；${data.warnings.join("；")}` : "";
+    const message = hasExternalEvent ? "已撤回排期，并删除对应日历事件。" : "已撤回排期。";
+    showToast(`${message}${warning}`);
   }
 }
 

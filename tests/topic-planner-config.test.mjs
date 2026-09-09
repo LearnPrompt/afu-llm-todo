@@ -20,6 +20,17 @@ test('createDefaultPlannerSettings exposes editable relative directories for fir
   assert.equal(settings.larkCalendarId, '');
   assert.equal(settings.larkCalendarName, '');
   assert.equal(settings.macosCalendarName, '');
+  assert.equal(settings.larkVotingBaseUrl, '');
+  assert.deepEqual(settings.larkVotingFieldNames, {
+    title: '选题',
+    summary: '一句话',
+    tags: '标签',
+    sourceUrl: '来源链接',
+    scheduledAt: '排期时间',
+    afuPath: 'Afu路径',
+    documentUrl: '飞书文档',
+    votingDate: '入池日期',
+  });
   assert.equal(settings.wikiMode, 'off');
   assert.equal(settings.wikiDir, '30_整理Wiki');
   assert.equal(settings.wikiIndexPath, '30_整理Wiki/index.md');
@@ -42,6 +53,14 @@ test('normalizePlannerSettings trims user input and keeps relative directory lay
     larkCalendarId: ' cal_custom ',
     larkCalendarName: ' 内容排期 ',
     macosCalendarName: ' 内容排期 ',
+    larkVotingBaseUrl: ' https://example.feishu.cn/base/base_1?table=tbl_1 ',
+    larkVotingFieldNames: {
+      title: ' 标题 ',
+      summary: ' 大白话 ',
+      tags: '',
+      documentUrl: ' 选题原文 ',
+      votingDate: ' 投票日 ',
+    },
     wikiMode: 'agent',
     wikiDir: ' /研究/内容Wiki/ ',
     wikiIndexPath: ' /研究/内容Wiki/index.md/ ',
@@ -61,6 +80,17 @@ test('normalizePlannerSettings trims user input and keeps relative directory lay
   assert.equal(normalized.larkCalendarId, 'cal_custom');
   assert.equal(normalized.larkCalendarName, '内容排期');
   assert.equal(normalized.macosCalendarName, '内容排期');
+  assert.equal(normalized.larkVotingBaseUrl, 'https://example.feishu.cn/base/base_1?table=tbl_1');
+  assert.deepEqual(normalized.larkVotingFieldNames, {
+    title: '标题',
+    summary: '大白话',
+    tags: '标签',
+    sourceUrl: '来源链接',
+    scheduledAt: '排期时间',
+    afuPath: 'Afu路径',
+    documentUrl: '选题原文',
+    votingDate: '投票日',
+  });
   assert.equal(normalized.wikiMode, 'agent');
   assert.equal(normalized.wikiDir, '研究/内容Wiki');
   assert.equal(normalized.wikiIndexPath, '研究/内容Wiki/index.md');

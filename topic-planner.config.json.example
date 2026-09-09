@@ -37,5 +37,16 @@
     }
   ],
   "calendarProvider": "none",
-  "macosCalendarName": ""
+  "larkCalendarId": "",
+  "larkCalendarName": "",
+  "macosCalendarName": "",
+  "larkVotingBaseUrl": "",
+  "larkVotingFieldNames": {
+    "title": "选题",
+    "summary": "一句话",
+    "tags": "标签",
+    "sourceUrl": "来源链接",
+    "scheduledAt": "排期时间",
+    "afuPath": "Afu路径"
+  }
 }

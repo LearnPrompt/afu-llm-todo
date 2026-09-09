@@ -45,8 +45,10 @@ const state = {
   toast: null,
   workspaceView: "inbox",
   scheduleTarget: null,
+  larkVotingTarget: null,
   disposeTarget: null,
   scheduleSubmitting: false,
+  larkVotingSubmitting: false,
   dailyInboxDialogShown: false,
   dailyInboxDate: "",
   dailyInboxPendingPaths: null,
@@ -120,6 +122,15 @@ const elements = {
   plannerLarkCalendarField: document.querySelector("#plannerLarkCalendarField"),
   plannerLarkCalendarId: document.querySelector("#plannerLarkCalendarId"),
   plannerLarkCalendarStatus: document.querySelector("#plannerLarkCalendarStatus"),
+  plannerLarkVotingBaseUrl: document.querySelector("#plannerLarkVotingBaseUrl"),
+  plannerLarkVotingTitleField: document.querySelector("#plannerLarkVotingTitleField"),
+  plannerLarkVotingSummaryField: document.querySelector("#plannerLarkVotingSummaryField"),
+  plannerLarkVotingTagsField: document.querySelector("#plannerLarkVotingTagsField"),
+  plannerLarkVotingSourceUrlField: document.querySelector("#plannerLarkVotingSourceUrlField"),
+  plannerLarkVotingScheduledAtField: document.querySelector("#plannerLarkVotingScheduledAtField"),
+  plannerLarkVotingAfuPathField: document.querySelector("#plannerLarkVotingAfuPathField"),
+  plannerLarkVotingDocumentUrlField: document.querySelector("#plannerLarkVotingDocumentUrlField"),
+  plannerLarkVotingDateField: document.querySelector("#plannerLarkVotingDateField"),
   plannerMacosCalendarField: document.querySelector("#plannerMacosCalendarField"),
   plannerMacosCalendarName: document.querySelector("#plannerMacosCalendarName"),
   plannerMacosCalendarStatus: document.querySelector("#plannerMacosCalendarStatus"),
@@ -152,6 +163,14 @@ const elements = {
   scheduleCalendarProvider: document.querySelector("#scheduleCalendarProvider"),
   scheduleCalendarHint: document.querySelector("#scheduleCalendarHint"),
   scheduleSubmitBtn: document.querySelector("#scheduleSubmitBtn"),
+  larkVotingDialog: document.querySelector("#larkVotingDialog"),
+  larkVotingForm: document.querySelector("#larkVotingForm"),
+  larkVotingTitle: document.querySelector("#larkVotingTitle"),
+  larkVotingSummary: document.querySelector("#larkVotingSummary"),
+  larkVotingHint: document.querySelector("#larkVotingHint"),
+  larkVotingSubmitBtn: document.querySelector("#larkVotingSubmitBtn"),
+  larkVotingCancelBtn: document.querySelector("#larkVotingCancelBtn"),
+  larkVotingCloseBtn: document.querySelector("#larkVotingCloseBtn"),
   disposeDialog: document.querySelector("#disposeDialog"),
   disposeForm: document.querySelector("#disposeForm"),
   disposeTitle: document.querySelector("#disposeTitle"),
@@ -377,6 +396,15 @@ function bindEvents() {
   });
 
   elements.scheduleForm.addEventListener("submit", submitSchedule);
+  elements.larkVotingForm?.addEventListener("submit", submitLarkVoting);
+  elements.larkVotingCancelBtn?.addEventListener("click", closeLarkVotingDialog);
+  elements.larkVotingCloseBtn?.addEventListener("click", closeLarkVotingDialog);
+  elements.larkVotingDialog?.addEventListener("cancel", (event) => {
+    if (state.larkVotingSubmitting) event.preventDefault();
+  });
+  elements.larkVotingDialog?.addEventListener("close", () => {
+    if (!state.larkVotingSubmitting) state.larkVotingTarget = null;
+  });
   elements.scheduleStart.addEventListener("input", () => { clearActiveScheduleSlot(); renderScheduleDaySidebar(); });
   elements.scheduleEnd.addEventListener("input", () => { clearActiveScheduleSlot(); renderScheduleDaySidebar(); });
   elements.scheduleDate?.addEventListener("input", () => renderScheduleDaySidebar());
@@ -423,6 +451,9 @@ async function loadTopics() {
     state.inboxSummary = payload.inboxSummary || null;
     state.settings = payload.settings || null;
     state.hasSavedConfig = Boolean(payload.hasSavedConfig);
+    if (!state.hasSavedConfig && elements.plannerSettingsDetails) {
+      elements.plannerSettingsDetails.open = true;
+    }
     state.configPath = payload.configPath || "";
     state.lark = payload.lark || null;
     await loadCompletedWeek();
@@ -519,6 +550,7 @@ async function loadLarkCalendars() {
   state.larkCalendarsLoading = true;
   state.larkCalendarsError = "";
   renderLarkCalendarSelect();
+  renderLarkVotingSettings();
   try {
     const response = await fetch("/api/lark/calendars");
     const payload = await response.json();
@@ -720,10 +752,25 @@ function renderPlannerSettings() {
   elements.plannerCalendarProvider.value = state.settings.calendarProvider || 'none';
   renderMacOSCalendarSelect();
   renderLarkCalendarSelect();
+  renderLarkVotingSettings();
   elements.plannerSettingsHint.textContent = getSettingsHint(state.settings);
   renderLarkSetupPanel();
   renderVaultLinkBanner();
   renderExternalCalendarPickers();
+}
+
+function renderLarkVotingSettings() {
+  if (!elements.plannerLarkVotingBaseUrl) return;
+  const fieldNames = state.settings?.larkVotingFieldNames || {};
+  elements.plannerLarkVotingBaseUrl.value = state.settings?.larkVotingBaseUrl || "";
+  elements.plannerLarkVotingTitleField.value = fieldNames.title || "选题";
+  elements.plannerLarkVotingSummaryField.value = fieldNames.summary || "一句话";
+  elements.plannerLarkVotingTagsField.value = fieldNames.tags || "标签";
+  elements.plannerLarkVotingSourceUrlField.value = fieldNames.sourceUrl || "来源链接";
+  elements.plannerLarkVotingScheduledAtField.value = fieldNames.scheduledAt || "排期时间";
+  elements.plannerLarkVotingAfuPathField.value = fieldNames.afuPath || "Afu路径";
+  elements.plannerLarkVotingDocumentUrlField.value = fieldNames.documentUrl || "飞书文档";
+  elements.plannerLarkVotingDateField.value = fieldNames.votingDate || "入池日期";
 }
 
 function renderExternalCalendarPickers() {
@@ -940,15 +987,15 @@ function renderBacklog() {
   elements.backlogHint.textContent = suggestionsActive
     ? "AI 建议分组中:已临时显示全部卡片,组号颜色和下方建议一一对应。"
     : state.recentTopicPaths.length
-      ? "最近转入的卡片已置顶；确认后再拖进日历。"
-      : "筛选后挑一张，拖到右侧周历。";
+      ? "最近转入的卡片已置顶；可先送团队投票，也可直接排期。"
+      : "可先送团队投票，也可直接拖到右侧周历。";
 
   elements.backlogList.innerHTML = "";
 
   if (topics.length === 0) {
     elements.backlogList.innerHTML = `
       <div class="empty-state">
-        <strong>当前筛选下没有待排期选题</strong>
+        <strong>当前筛选下没有匹配选题</strong>
         <span>搜索：${escapeHtml(state.search || '无')} · 阶段：${escapeHtml(state.stageFilter || '全部阶段')}</span>
         <button id="clearBacklogFilterBtn" class="mini-btn" type="button">清空筛选</button>
       </div>`;
@@ -1601,12 +1648,21 @@ function createTopicCard(topic, options = {}) {
 
   const completeBtn = fragment.querySelector('[data-action="complete"]');
   const scheduleBtn = fragment.querySelector('[data-action="schedule"]');
+  const larkVotingBtn = fragment.querySelector('[data-action="lark-voting"]');
+  const moreMenu = fragment.querySelector(".topic-more-menu");
   const unscheduleBtn = fragment.querySelector('[data-action="unschedule"]');
   const revertImportBtn = fragment.querySelector('[data-action="revert-import"]');
   const disposeBtn = fragment.querySelector('[data-action="dispose"]');
 
+  larkVotingBtn.textContent = topic.larkVotingRecordId ? "更新投票" : "送团队投票";
+  larkVotingBtn.title = topic.larkVotingSyncStatus || "提交到飞书团队投票池";
+  larkVotingBtn.addEventListener("click", () => openLarkVotingDialog(topic));
+
   if (topic.scheduledDate) {
     scheduleBtn.textContent = "重新排期";
+    moreMenu.prepend(larkVotingBtn);
+  } else {
+    completeBtn.remove();
   }
 
   completeBtn.addEventListener("click", () => handleCompleteTopic(topic));
@@ -1620,7 +1676,7 @@ function createTopicCard(topic, options = {}) {
 
   if (options.calendar) {
     card.addEventListener("click", (e) => {
-      if (e.target.closest("button")) return;
+      if (e.target.closest("button, .topic-more-actions")) return;
       card.classList.toggle("is-expanded");
     });
   }
@@ -2005,7 +2061,8 @@ async function submitSchedule(event) {
   const data = await postAndReload("/api/topics/schedule", payload);
   setScheduleSubmitting(false);
   if (!data) return;
-  showToast(getScheduleResultMessage(data.topic, payload.calendarProvider));
+  const votingWarning = data.warnings?.length ? `；${data.warnings.join("；")}` : "";
+  showToast(`${getScheduleResultMessage(data.topic, payload.calendarProvider)}${votingWarning}`);
   elements.scheduleDialog.close();
   if (state.scheduleQueue.length) {
     advanceScheduleQueue();
@@ -2017,6 +2074,80 @@ function setScheduleSubmitting(isSubmitting) {
   if (!elements.scheduleSubmitBtn) return;
   elements.scheduleSubmitBtn.disabled = state.scheduleSubmitting;
   elements.scheduleSubmitBtn.textContent = state.scheduleSubmitting ? "保存中…" : "保存排期";
+}
+
+function hasLarkVotingPool() {
+  return Boolean(String(state.settings?.larkVotingBaseUrl || "").trim());
+}
+
+function openLarkVotingDialog(topic) {
+  if (state.larkVotingSubmitting || elements.larkVotingDialog?.open) return;
+  if (!hasLarkVotingPool()) {
+    showToast("请先在工作区设置中填写飞书多维表格链接。", {
+      label: "打开设置",
+      onClick: () => {
+        elements.plannerSettingsDetails.open = true;
+        elements.plannerLarkVotingBaseUrl?.scrollIntoView({ behavior: "smooth", block: "center" });
+        elements.plannerLarkVotingBaseUrl?.focus();
+      },
+    });
+    return;
+  }
+
+  state.larkVotingTarget = topic;
+  setLarkVotingSubmitting(false);
+  const displayTitle = stripTopicPrefix(topic.title);
+  const excerpt = String(topic.excerpt || "").trim();
+  const suggestedSummary = excerpt && excerpt !== "选题判断" && excerpt !== "暂无摘要" ? excerpt : displayTitle;
+  elements.larkVotingTitle.textContent = `${topic.larkVotingRecordId ? "更新" : "提交"}：${displayTitle}`;
+  elements.larkVotingSummary.value = topic.larkVotingSummary || suggestedSummary;
+  elements.larkVotingHint.textContent = topic.larkVotingRecordId
+    ? "这次会更新原有飞书文档和记录，团队已有的投票字段不会被覆盖。"
+    : topic.scheduledDate
+      ? "Afu 会创建飞书文档并写入当天投票池；票数和投票人由团队在表内维护。"
+      : "Afu 会创建飞书文档并写入投票池，排期保持为空；票数和投票人由团队在表内维护。";
+  elements.larkVotingDialog.showModal();
+  elements.larkVotingSummary.focus();
+  elements.larkVotingSummary.select();
+}
+
+function closeLarkVotingDialog() {
+  if (state.larkVotingSubmitting) return;
+  elements.larkVotingDialog?.close();
+  state.larkVotingTarget = null;
+}
+
+async function submitLarkVoting(event) {
+  event.preventDefault();
+  if (!state.larkVotingTarget || state.larkVotingSubmitting) return;
+  const summary = elements.larkVotingSummary.value.trim();
+  if (!summary) {
+    elements.larkVotingSummary.focus();
+    return;
+  }
+
+  const target = state.larkVotingTarget;
+  setLarkVotingSubmitting(true);
+  const data = await postAndReload("/api/topics/lark-voting", { path: target.path, summary });
+  setLarkVotingSubmitting(false);
+  if (!data) return;
+
+  elements.larkVotingDialog.close();
+  state.larkVotingTarget = null;
+  const warning = data.warnings?.length ? `；${data.warnings.join("；")}` : "";
+  showToast(`${data.created ? "已生成文档并提交" : "已更新文档和投票记录"}${warning}`, {
+    label: "打开投票表",
+    onClick: () => window.open(data.baseUrl, "_blank", "noopener,noreferrer"),
+  });
+}
+
+function setLarkVotingSubmitting(isSubmitting) {
+  state.larkVotingSubmitting = Boolean(isSubmitting);
+  if (!elements.larkVotingSubmitBtn) return;
+  elements.larkVotingSubmitBtn.disabled = state.larkVotingSubmitting;
+  elements.larkVotingSubmitBtn.textContent = state.larkVotingSubmitting
+    ? "同步中…"
+    : (state.larkVotingTarget?.larkVotingDocUrl ? "更新文档与投票" : "生成文档并提交");
 }
 
 function handleBatchDelete() {
@@ -2129,10 +2260,11 @@ async function handleCompleteTopic(topic) {
 
 async function handleUnschedule(topic) {
   const hasExternalEvent = Boolean(topic.larkEventId || topic.macosEventId);
+  const returnPool = topic.larkVotingRecordId || topic.larkVotingDocId ? "待投票池" : "待排期池";
   const confirmed = window.confirm(
     hasExternalEvent
-      ? "把这个选题移回待排期池，并删除已经同步的外部日程？"
-      : "把这个选题移回待排期池？",
+      ? `把这个选题移回${returnPool}，并删除已经同步的外部日程？`
+      : `把这个选题移回${returnPool}？`,
   );
   if (!confirmed) return;
 
@@ -2141,7 +2273,9 @@ async function handleUnschedule(topic) {
     removeFromCalendar: hasExternalEvent,
   });
   if (data) {
-    showToast(hasExternalEvent ? "已撤回排期，并删除对应日历事件。" : "已撤回排期。");
+    const warning = data.warnings?.length ? `；${data.warnings.join("；")}` : "";
+    const message = hasExternalEvent ? "已撤回排期，并删除对应日历事件。" : "已撤回排期。";
+    showToast(`${message}${warning}`);
   }
 }
 
@@ -2466,6 +2600,8 @@ async function refetchInboxCandidate(candidate, button, card) {
       button.textContent = originalText;
       return;
     }
+    state.inboxCandidateEdits.delete(candidate.sourcePath);
+    persistInboxCandidateEdits();
     await loadTopics();
     showToast(data.message || '抓取完成');
   } catch (error) {
@@ -2797,6 +2933,17 @@ async function submitPlannerSettings(event) {
     larkCalendarName: elements.plannerLarkCalendarId.value.trim()
       ? (elements.plannerLarkCalendarId.selectedOptions?.[0]?.textContent || "").trim()
       : "",
+    larkVotingBaseUrl: elements.plannerLarkVotingBaseUrl?.value.trim() || "",
+    larkVotingFieldNames: {
+      title: elements.plannerLarkVotingTitleField?.value.trim() || "选题",
+      summary: elements.plannerLarkVotingSummaryField?.value.trim() || "一句话",
+      tags: elements.plannerLarkVotingTagsField?.value.trim() || "标签",
+      sourceUrl: elements.plannerLarkVotingSourceUrlField?.value.trim() || "来源链接",
+      scheduledAt: elements.plannerLarkVotingScheduledAtField?.value.trim() || "排期时间",
+      afuPath: elements.plannerLarkVotingAfuPathField?.value.trim() || "Afu路径",
+      documentUrl: elements.plannerLarkVotingDocumentUrlField?.value.trim() || "飞书文档",
+      votingDate: elements.plannerLarkVotingDateField?.value.trim() || "入池日期",
+    },
     ...getPlannerWikiValues(workspaceMode, workspaceMode === 'standalone' ? '' : getDirectoryPickerValue(elements.plannerVaultRoot)),
     dailyCapacity: state.settings?.dailyCapacity || RECOMMENDED_DAILY_CAPACITY,
     scheduleTimeSlots: getScheduleTimeSlots(),
@@ -2832,7 +2979,7 @@ async function submitPlannerSettings(event) {
       };
       state.vaultDirectoryEditing = false;
     }
-    elements.plannerSettingsHint.textContent = '目录设置已保存。';
+    elements.plannerSettingsHint.textContent = '工作区设置已保存。';
     await loadTopics();
     loadExternalEvents();
     await loadSettingsDiagnostics();

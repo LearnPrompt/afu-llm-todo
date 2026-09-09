@@ -466,6 +466,41 @@ body {
   min-width: 0;
 }
 
+.voting-pool-settings {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 7px;
+}
+
+.field-mapping-details {
+  padding: 10px 12px;
+  border: 1px solid rgba(36, 25, 13, 0.09);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.34);
+}
+
+.field-mapping-details summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.field-mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.voting-dialog-card {
+  max-width: 620px;
+}
+
+.voting-dialog-copy {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
 .directory-picker-control {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 46px;
@@ -1365,6 +1400,46 @@ textarea.inbox-inline-editor {
   justify-content: flex-start;
 }
 
+.topic-more-actions {
+  position: relative;
+}
+
+.topic-more-actions > summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+
+.topic-more-actions > summary::-webkit-details-marker {
+  display: none;
+}
+
+.topic-more-actions[open] > summary {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.topic-more-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 12;
+  display: grid;
+  min-width: 148px;
+  padding: 8px;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--paper);
+  box-shadow: 0 14px 32px rgba(49, 36, 24, 0.16);
+}
+
+.topic-more-menu .mini-btn {
+  width: 100%;
+  justify-content: flex-start;
+  white-space: nowrap;
+}
+
 .topic-priority,
 .topic-stage,
 .topic-sync,
@@ -1967,6 +2042,10 @@ textarea.inbox-inline-editor {
   .wiki-actions,
   .wiki-steps,
   .connector-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .field-mapping-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 

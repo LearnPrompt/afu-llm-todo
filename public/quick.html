@@ -84,6 +84,7 @@
               <p></p>
             </div>
             <div id="topicTags" class="topic-tags"></div>
+            <button id="voteBtn" class="card-vote-action" type="button" hidden>送团队投票</button>
             <footer class="card-footer">
               <span id="topicUpdated"></span>
               <span id="queuePosition"></span>
@@ -138,7 +139,7 @@
             已排期 <span id="scheduledCount">0</span>
           </button>
           <button class="workspace-tab" type="button" data-mobile-workspace-tab="pending">
-            待排期 <span id="pendingCount">0</span>
+            待处理 <span id="pendingCount">0</span>
           </button>
         </nav>
 
@@ -182,6 +183,23 @@
         <div class="dialog-actions">
           <button id="cancelRejectBtn" class="secondary-button" type="button">取消</button>
           <button class="confirm-reject" type="submit">确认拒绝</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="voteDialog" class="reason-dialog vote-dialog">
+      <form id="voteForm" method="dialog">
+        <div class="dialog-handle" aria-hidden="true"></div>
+        <p class="kicker">送团队投票</p>
+        <h2 id="voteTitle">确认一句话</h2>
+        <p class="vote-dialog-copy">这句话会写进飞书投票池，团队已有的票数和投票人不会被覆盖。</p>
+        <label class="vote-summary-field">
+          一句话说明
+          <textarea id="voteSummary" maxlength="280" rows="4" required></textarea>
+        </label>
+        <div class="dialog-actions">
+          <button id="cancelVoteBtn" class="secondary-button" type="button">取消</button>
+          <button id="confirmVoteBtn" class="confirm-vote" type="submit">确认提交</button>
         </div>
       </form>
     </dialog>

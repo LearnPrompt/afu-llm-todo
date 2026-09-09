@@ -105,12 +105,20 @@ function extractTitleFromInbox(frontmatter, body, filePath) {
 }
 
 function extractExcerpt(body) {
-  const lines = String(body || '')
+  const source = String(body || '');
+  const threadsCapture = source.match(/<!-- afu-threads:[^>]+:start -->([\s\S]*?)<!-- afu-threads:[^>]+:end -->/);
+  const lines = (threadsCapture?.[1] || source)
+    .replace(/<!--[\s\S]*?-->/g, '')
     .replace(/!\[\[.*?\]\]/g, '')
     .replace(/\[\[(.*?)\]\]/g, '$1')
     .split(/\r?\n/)
     .map((line) => normalizeWhitespace(line.replace(/^#+\s+/, '').replace(/^>\s?/, '')))
-    .filter(Boolean);
+    .filter((line) => Boolean(line) && (!threadsCapture || (
+      line !== '---'
+      && line !== '作者连续回复'
+      && !/^\d+\.\s+https?:\/\//i.test(line)
+      && !/^-\s+(?:来源链接|作者|Threads 抓取日期|连续正文)：/u.test(line)
+    )));
   return lines.slice(0, 3).join(' ').slice(0, 180);
 }
 

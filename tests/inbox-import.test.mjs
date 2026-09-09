@@ -78,6 +78,17 @@ test('deriveInboxCandidate flags quota-failure notices even when url is present'
   assert.ok(candidate.reasons.includes('内容疑似未完整抓取'));
 });
 
+test('deriveInboxCandidate prefers fetched Threads text over preserved sync boilerplate', () => {
+  const raw = `---\ntitle: 雪豹镜头提示词\nauthor: liq_media\nurl: https://www.threads.com/@liq_media/post/ROOT123\n---\n\n<!-- afu-threads:ROOT123:start -->\n主帖真正正文\n\n## 作者连续回复\n\n### 1. https://www.threads.com/@liq_media/post/REPLY1\n\n作者补充正文\n\n---\n- 来源链接：https://www.threads.com/@liq_media/post/ROOT123\n- 作者：@liq_media\n- Threads 抓取日期：2026-08-08\n- 连续正文：2 条\n\n<!-- afu-threads:ROOT123:end -->\n\n## 原始同步内容\n\nThreads • Log in`;
+  const candidate = deriveInboxCandidate({
+    filePath: '00_收件箱/Threads • Log in.md',
+    raw,
+  });
+
+  assert.equal(candidate.title, '雪豹镜头提示词');
+  assert.equal(candidate.excerpt, '主帖真正正文 作者补充正文');
+});
+
 test('buildTopicDraftFromInbox creates planner-compatible topic card markdown', () => {
   const candidate = deriveInboxCandidate({
     filePath: sampleInboxPath,

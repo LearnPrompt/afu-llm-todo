@@ -247,17 +247,26 @@ async function fetchThreadsThread(sourceUrl, { fetchImpl = fetch } = {}) {
 
 function buildThreadsMarkdownSection(thread, date = new Date().toISOString().slice(0, 10)) {
   const marker = `afu-threads:${thread.rootCode}`;
+  const [rootPost, ...replyPosts] = thread.posts;
   const lines = [
     `<!-- ${marker}:start -->`,
-    `## 补充素材（Threads 抓取日期 ${date}）`,
-    `- 来源链接：${thread.canonicalUrl}`,
-    `- 作者：@${thread.author}`,
-    `- 连续正文：${thread.posts.length} 条`,
+    rootPost?.text?.trim() || '_Threads 主帖没有可用正文_',
     '',
   ];
-  thread.posts.forEach((post, index) => {
-    lines.push(`### ${index + 1}. ${post.url}`, '', post.text, '');
-  });
+  if (replyPosts.length) {
+    lines.push('## 作者连续回复', '');
+    replyPosts.forEach((post, index) => {
+      lines.push(`### ${index + 1}. ${post.url}`, '', post.text, '');
+    });
+  }
+  lines.push(
+    '---',
+    `- 来源链接：${thread.canonicalUrl}`,
+    `- 作者：@${thread.author}`,
+    `- Threads 抓取日期：${date}`,
+    `- 连续正文：${thread.posts.length} 条`,
+    '',
+  );
   lines.push(`<!-- ${marker}:end -->`);
   return lines.join('\n');
 }
@@ -267,8 +276,26 @@ function upsertThreadsMarkdownSection(raw, thread, date) {
   const marker = `afu-threads:${thread.rootCode}`;
   const escapedMarker = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const existing = new RegExp(`\\n?<!-- ${escapedMarker}:start -->[\\s\\S]*?<!-- ${escapedMarker}:end -->\\n?`);
-  if (existing.test(raw)) return String(raw).replace(existing, `\n\n${section}\n`);
-  return `${String(raw).trimEnd()}\n\n${section}\n`;
+  const input = String(raw || '');
+  const frontmatter = input.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/);
+  let preservedBody = input.slice(frontmatter?.[0].length || 0).replace(existing, '\n').trim();
+  preservedBody = preservedBody.replace(/^## 原始同步内容\s*\r?\n+/u, '').trim();
+  return [
+    frontmatter?.[0].trimEnd() || '',
+    section,
+    preservedBody ? `## 原始同步内容\n\n${preservedBody}` : '',
+  ].filter(Boolean).join('\n\n') + '\n';
+}
+
+function deriveThreadsInboxTitle(thread, maxLength = 60) {
+  const rootText = String(thread?.posts?.[0]?.text || '')
+    .replace(/https?:\/\/\S+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const fallback = thread?.author ? `@${thread.author} 的 Threads 帖子` : 'Threads 帖子';
+  if (!rootText) return fallback;
+  if (rootText.length <= maxLength) return rootText;
+  return `${rootText.slice(0, maxLength).replace(/[，、；：,.!！?？\-]+$/u, '').trim()}…`;
 }
 
 function buildInstagramMarkdownSection(capture, date = new Date().toISOString().slice(0, 10)) {
@@ -306,6 +333,7 @@ function upsertInstagramMarkdownSection(raw, capture, date) {
 export {
   buildInstagramMarkdownSection,
   buildThreadsMarkdownSection,
+  deriveThreadsInboxTitle,
   fetchThreadsThread,
   findRecoverableSocialUrl,
   getInstagramMediaReference,

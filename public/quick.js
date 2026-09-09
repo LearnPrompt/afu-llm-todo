@@ -19,6 +19,7 @@ const state = {
   settings: null,
   lark: null,
   deferredPaths: new Set(),
+  reviewedPaths: new Set(),
   processedCount: 0,
   initialCount: 0,
   busy: false,
@@ -26,6 +27,7 @@ const state = {
   workspaceTab: "scheduled",
   scheduleDraft: null,
   scheduleWeekAnchor: new Date(),
+  votingTarget: null,
 };
 
 const elements = {
@@ -43,6 +45,7 @@ const elements = {
   topicExcerpt: document.querySelector("#topicExcerpt"),
   topicReason: document.querySelector("#topicReason"),
   topicTags: document.querySelector("#topicTags"),
+  voteBtn: document.querySelector("#voteBtn"),
   topicUpdated: document.querySelector("#topicUpdated"),
   queuePosition: document.querySelector("#queuePosition"),
   progressText: document.querySelector("#progressText"),
@@ -71,6 +74,12 @@ const elements = {
   rejectTitle: document.querySelector("#rejectTitle"),
   customRejectReason: document.querySelector("#customRejectReason"),
   cancelRejectBtn: document.querySelector("#cancelRejectBtn"),
+  voteDialog: document.querySelector("#voteDialog"),
+  voteForm: document.querySelector("#voteForm"),
+  voteTitle: document.querySelector("#voteTitle"),
+  voteSummary: document.querySelector("#voteSummary"),
+  cancelVoteBtn: document.querySelector("#cancelVoteBtn"),
+  confirmVoteBtn: document.querySelector("#confirmVoteBtn"),
   reviewLaterBtn: document.querySelector("#reviewLaterBtn"),
   refreshEmptyBtn: document.querySelector("#refreshEmptyBtn"),
   connectionDot: document.querySelector("#connectionDot"),
@@ -136,6 +145,15 @@ function bindEvents() {
   elements.rejectBtn.addEventListener("click", openRejectDialog);
   elements.rejectForm.addEventListener("submit", rejectCurrentTopic);
   elements.cancelRejectBtn.addEventListener("click", () => elements.rejectDialog.close());
+  elements.voteBtn.addEventListener("click", () => handleVotingAction(state.queue[0]));
+  elements.voteForm.addEventListener("submit", submitVotingTopic);
+  elements.cancelVoteBtn.addEventListener("click", closeVoteDialog);
+  elements.voteDialog.addEventListener("cancel", (event) => {
+    if (state.busy) event.preventDefault();
+  });
+  elements.voteDialog.addEventListener("close", () => {
+    if (!state.busy) state.votingTarget = null;
+  });
   elements.reviewLaterBtn.addEventListener("click", reviewDeferredTopics);
   elements.refreshEmptyBtn.addEventListener("click", () => loadTopics({ resetSession: true }));
   elements.dismissInstallHint.addEventListener("click", dismissInstallHint);
@@ -200,6 +218,7 @@ async function loadTopics({ resetSession = false } = {}) {
   setBusy(true);
   if (resetSession) {
     state.deferredPaths.clear();
+    state.reviewedPaths.clear();
     state.processedCount = 0;
   }
 
@@ -228,7 +247,7 @@ async function loadTopics({ resetSession = false } = {}) {
 
 function rebuildQueue() {
   state.queue = buildReviewQueue(state.topics)
-    .filter((topic) => !state.deferredPaths.has(topic.path));
+    .filter((topic) => !state.deferredPaths.has(topic.path) && !state.reviewedPaths.has(topic.path));
 }
 
 function render() {
@@ -253,6 +272,8 @@ function render() {
   elements.topicExcerpt.textContent = current.excerpt || "这张卡还没有摘要，先根据标题判断是否值得排进日历。";
   elements.topicUpdated.textContent = current.updated ? `更新于 ${current.updated}` : "等待判断";
   elements.queuePosition.textContent = `剩余 ${state.queue.length} 张`;
+  elements.voteBtn.hidden = !hasLarkVotingPool() && !getVotingDestinationUrl(current);
+  elements.voteBtn.textContent = hasSubmittedVoting(current) ? "打开团队投票 ↗" : "送团队投票";
 
   const reason = String(current.llmTodoReason || "").trim();
   elements.topicReason.hidden = !reason;
@@ -335,7 +356,7 @@ function renderWorkspace() {
   }
 
   if (!pending.length) {
-    elements.pendingWorkspaceList.append(createWorkspaceEmpty("没有待排期卡片。"));
+    elements.pendingWorkspaceList.append(createWorkspaceEmpty("没有待处理卡片。"));
   } else {
     for (const topic of pending) {
       elements.pendingWorkspaceList.append(createWorkspaceTopicCard(topic, { scheduled: false }));
@@ -386,6 +407,12 @@ function createWorkspaceTopicCard(topic, { scheduled }) {
     actions.append(schedule);
   }
 
+  if (hasLarkVotingPool() || getVotingDestinationUrl(topic)) {
+    const vote = createWorkspaceAction(hasSubmittedVoting(topic) ? "打开投票" : "送团队投票", "secondary");
+    vote.addEventListener("click", () => handleVotingAction(topic));
+    actions.append(vote);
+  }
+
   card.append(top, title, meta, actions);
   return card;
 }
@@ -413,14 +440,87 @@ async function unscheduleWorkspaceTopic(topic) {
 
   setBusy(true);
   try {
-    await postJson("/api/topics/unschedule", {
+    const data = await postJson("/api/topics/unschedule", {
       path: topic.path,
       removeFromCalendar: true,
     });
     await refreshAfterAction();
-    showToast("已取消排期");
+    showToast(withOperationWarnings("已取消排期", data.warnings));
     vibrate();
   } catch (error) {
+    showToast(error.message);
+  } finally {
+    setBusy(false);
+  }
+}
+
+function hasLarkVotingPool() {
+  return Boolean(String(state.settings?.larkVotingBaseUrl || "").trim());
+}
+
+function hasSubmittedVoting(topic) {
+  return Boolean(topic?.larkVotingRecordId || topic?.larkVotingDocId || topic?.larkVotingDocUrl);
+}
+
+function getVotingDestinationUrl(topic) {
+  return String(state.settings?.larkVotingBaseUrl || topic?.larkVotingDocUrl || "").trim();
+}
+
+function handleVotingAction(topic) {
+  if (!topic || state.busy || elements.voteDialog.open) return;
+  const destinationUrl = getVotingDestinationUrl(topic);
+  if (hasSubmittedVoting(topic) && destinationUrl) {
+    window.open(destinationUrl, "_blank", "noopener,noreferrer");
+    return;
+  }
+  if (!hasLarkVotingPool()) {
+    showToast("请先在桌面端工作区设置中配置团队投票池");
+    return;
+  }
+
+  state.votingTarget = topic;
+  const title = stripTopicPrefix(topic.title) || "未命名 Todo";
+  const excerpt = String(topic.excerpt || "").trim();
+  const suggestedSummary = excerpt && excerpt !== "选题判断" && excerpt !== "暂无摘要" ? excerpt : title;
+  elements.voteTitle.textContent = title;
+  elements.voteSummary.value = topic.larkVotingSummary || suggestedSummary;
+  elements.voteDialog.showModal();
+  elements.voteSummary.focus();
+  elements.voteSummary.select();
+}
+
+function closeVoteDialog() {
+  if (state.busy) return;
+  elements.voteDialog.close();
+  state.votingTarget = null;
+}
+
+async function submitVotingTopic(event) {
+  event.preventDefault();
+  const topic = state.votingTarget;
+  const summary = elements.voteSummary.value.trim();
+  if (!topic || state.busy) return;
+  if (!summary) {
+    elements.voteSummary.focus();
+    return;
+  }
+
+  const wasCurrentReviewCard = state.queue[0]?.path === topic.path;
+  setBusy(true);
+  try {
+    const data = await postJson("/api/topics/lark-voting", { path: topic.path, summary });
+    if (wasCurrentReviewCard) {
+      state.reviewedPaths.add(topic.path);
+      await animateCardAway();
+      state.processedCount += 1;
+    }
+    elements.voteDialog.close();
+    state.votingTarget = null;
+    await refreshAfterAction();
+    showToast(withOperationWarnings("已送进团队投票池", data.warnings));
+    vibrate();
+  } catch (error) {
+    elements.currentCard.classList.remove("is-leaving");
     showToast(error.message);
   } finally {
     setBusy(false);
@@ -652,7 +752,7 @@ async function submitScheduleDialog(event) {
   draft.serverError = "";
   setBusy(true);
   try {
-    await postJson("/api/topics/schedule", {
+    const data = await postJson("/api/topics/schedule", {
       path: draft.path,
       scheduledDate: draft.date,
       scheduledStart: draft.start,
@@ -665,7 +765,7 @@ async function submitScheduleDialog(event) {
     }
     closeScheduleDialog();
     await refreshAfterAction();
-    showToast(`已排到 ${successLabel}`);
+    showToast(withOperationWarnings(`已排到 ${successLabel}`, data.warnings));
     vibrate();
   } catch (submitError) {
     elements.currentCard.classList.remove("is-leaving");
@@ -701,7 +801,7 @@ async function scheduleCurrentTopic(kind) {
 
   setBusy(true);
   try {
-    await postJson("/api/topics/schedule", {
+    const data = await postJson("/api/topics/schedule", {
       path: topic.path,
       scheduledDate: suggestion.date,
       scheduledStart: suggestion.start,
@@ -712,7 +812,7 @@ async function scheduleCurrentTopic(kind) {
     state.processedCount += 1;
     await refreshAfterAction();
     const capacityNote = suggestion.overRecommendedCapacity ? "，已超过推荐容量" : "";
-    showToast(`已排到${suggestion.dayLabel} ${suggestion.start}${capacityNote}`);
+    showToast(withOperationWarnings(`已排到${suggestion.dayLabel} ${suggestion.start}${capacityNote}`, data.warnings));
     vibrate();
   } catch (error) {
     elements.currentCard.classList.remove("is-leaving");
@@ -818,6 +918,8 @@ function setBusy(busy) {
   }
   elements.laterBtn.disabled = busy;
   elements.rejectBtn.disabled = busy;
+  elements.voteBtn.disabled = busy;
+  elements.confirmVoteBtn.disabled = busy;
   elements.workspaceView.querySelectorAll(".workspace-action").forEach((button) => {
     button.disabled = busy;
   });
@@ -883,6 +985,12 @@ function showToast(message) {
   toastTimer = window.setTimeout(() => {
     elements.toast.hidden = true;
   }, 2200);
+}
+
+function withOperationWarnings(message, warnings) {
+  return Array.isArray(warnings) && warnings.length
+    ? `${message}；${warnings.join("；")}`
+    : message;
 }
 
 function vibrate() {

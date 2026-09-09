@@ -1,4 +1,4 @@
-const CACHE_NAME = "afu-quick-v2";
+const CACHE_NAME = "afu-quick-v3";
 const APP_SHELL = [
   "/quick",
   "/quick.html",
